@@ -126,9 +126,12 @@ def _resolve(dotted: str):
 
 def load_toml(path: Path, *, registry: dict[str, Spec] | None = None) -> list[Spec]:
     """Register every ``[[diagnostic]]`` table: name, function = "pkg.mod:fn", config = "pkg.mod:Config", title,
-    family, role, hint, emits, unit, optional consumers / view_extra / summary. A broken table raises with its name."""
+    family, role, hint, emits, unit, optional consumers / view_extra / summary. A broken table raises with its name.
 
-    tables = tomllib.loads(Path(path).read_text())["diagnostic"]
+    A table without ``function`` is not a Spec and is left to its reader: io-diagnostics' ``diagnostics.toml`` puts, in the same
+    file, the tables that bind a registered diagnostic to the entities it runs on (io_diagnostics/stock_diagnostics.py)."""
+
+    tables = [table for table in tomllib.loads(Path(path).read_text()).get("diagnostic", []) if "function" in table]
     out = []
     for table in tables:
         fields = {k: v for k, v in table.items() if k not in ("function", "config")}
