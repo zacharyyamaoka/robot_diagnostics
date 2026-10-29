@@ -1,14 +1,19 @@
 """The stock diagnostics, registered on import. Each is one pure function and one frozen config; a part type gets its
 diagnostics by picking these with its own config (``catalog.py``), not by writing code.
 
-Implemented here (the reference): 11 functions. The rest of the catalog's primitives are specified in ``catalog.py``
-(``implemented=False``) and land in this package the same way.
+All 30 of the catalog's primitives are implemented (the first 13 since the reference; the 17 it only specified landed 2026-10-28):
+tracking.py, fidelity.py, truthfulness.py (+ agreement), health.py (+ stamp_delay), coverage.py, ../rollup.py, feedback.py,
+events.py (share, event_interval, staleness), response.py (step_response), iso9283.py (pose / path accuracy), characteristic.py
+(hysteresis_loop, allan_variance), camera.py (reprojection_error, depth_plane, image_sharpness, marker_drift), spectral.py.
+Each cites the standard it computes in its module docstring.
 """
 
 from __future__ import annotations
 
 from ..registry import Spec, register
 from ..rollup import GateMatrixConfig, RollupConfig, gate_matrix, rollup
+from .camera import (DepthPlaneConfig, MarkerDriftConfig, ReprojectionConfig, SharpnessConfig, depth_plane, image_sharpness, marker_drift,
+                     reprojection_error)
 from .characteristic import AllanConfig, HysteresisConfig, allan_variance, hysteresis_loop
 from .coverage import CoverageConfig, coverage
 from .events import EventIntervalConfig, ShareConfig, StalenessConfig, event_interval, share, staleness
@@ -17,6 +22,7 @@ from .fidelity import FidelityRatioConfig, FloorConfig, ModelErrorConfig, fideli
 from .iso9283 import PathAccuracyConfig, PoseAccuracyConfig, path_accuracy, pose_accuracy
 from .response import StepResponseConfig, step_response
 from .health import BoxConfig, FaultCodesConfig, RateConfig, StampDelayConfig, box, fault_codes, sample_rate, stamp_delay
+from .spectral import SpectralAngleConfig, SpectralQualityConfig, spectral_angle, spectral_quality
 from .tracking import StopErrorConfig, TrackingErrorConfig, stop_error, tracking_error
 from .truthfulness import AgreementConfig, KnownLoadConfig, KtConsistencyConfig, agreement, known_load_gain, kt_consistency
 
@@ -74,6 +80,18 @@ STOCK = [
     Spec("stock.allan_variance", allan_variance, AllanConfig, "Allan deviation", "characteristic", "driver", "evidence", "series", "rad/s/sqrt(Hz)",
          view_extra="log-log Allan deviation vs tau: the slopes are the noise terms",
          summary="overlapping Allan deviation (IEEE 952); N at tau 1 s, B = floor / 0.664, K at tau 3 s"),
+    Spec("stock.reprojection_error", reprojection_error, ReprojectionConfig, "reprojection error", "truthfulness", "health", "distribution", "series", "px",
+         summary="RMS reprojection error over every corner and per view (OpenCV calibrateCamera RMS / perViewErrors)"),
+    Spec("stock.depth_plane", depth_plane, DepthPlaneConfig, "depth quality (flat target)", "truthfulness", "health", "threshold_band", "series", "% of Z",
+         summary="fill rate, plane-fit RMS, Z accuracy and temporal noise in the central ROI (Intel depth quality metrics)"),
+    Spec("stock.image_sharpness", image_sharpness, SharpnessConfig, "sharpness", "health", "health", "threshold_band", "series", "1",
+         summary="variance of the Laplacian per frame (Pech-Pacheco 2000); the blurriest frame heads"),
+    Spec("stock.marker_drift", marker_drift, MarkerDriftConfig, "marker drift", "truthfulness", "health", "threshold_band", "series", "px",
+         summary="a fixed tag's offset from its calibrated pixel centre or pose"),
+    Spec("stock.spectral_quality", spectral_quality, SpectralQualityConfig, "spectral quality", "characteristic", "health", "distribution", "series", "1",
+         summary="SNR per band on a uniform target; smile and keystone (px) on line and edge targets"),
+    Spec("stock.spectral_angle", spectral_angle, SpectralAngleConfig, "spectral angle", "truthfulness", "driver", "distribution", "series", "rad",
+         summary="spectral angle mapper (Kruse 1993) between measured and reference spectra per material"),
 ]
 
 for _spec in STOCK:

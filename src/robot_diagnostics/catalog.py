@@ -2,7 +2,7 @@
 
 A part type's diagnostics are (stock primitive, config) pairs, never new code: Zach, 2026-10-28, "for most diaginstics you
 don't really need to right any standard code beacuse they are so stock". ``PRIMITIVES`` are the functions (the ones
-``implemented`` are in ``stock/``; the rest are specified here and land the same way). ``ENTRIES`` are the per-part
+``implemented`` are in ``stock/``; since 2026-10-28 that is all of them). ``ENTRIES`` are the per-part
 instances with their default config, gate, KPI role, data-ui hint and consumer.
 
 Provenance is explicit on every entry (``prov``):
@@ -84,7 +84,7 @@ PRIMITIVES = {p.name: p for p in [
               "member Results", "title, tolerate_fail (the spider rule), not_run_is", "RobotDx summarize + caused_by (record v0.1); AUTOSAR DEM causal faults"),
     Primitive("stock.gate_matrix", "rollup", "gate_matrix", "matrix", True, "subjects x gates; headline = passing cells",
               "(subject, gate, Result) cells", "gates, subjects", "bam_rack_twin type_gate_cells; Vibe Tracks gate matrix"),
-    # ---- specified: land in stock/ the same way ----
+    # ---- specified here first, implemented in stock/ 2026-10-28 ----
     Primitive("stock.feedback_share", "sim_vs_real", "kpi_trend", "scalar", True, "RMS(tau - tau_ff) / RMS(tau) over controlled rows: what feedback still supplies",
               "Trajectories: tau_nm, tau_ff_nm", "rows (controlled), pooled | per_run, limits", "bam_rack_twin vt_kpi.feedback_share"),
     Primitive("stock.share", "real_vs_target", "kpi_trend", "scalar", True, "share of true events in a window with a Wilson 95 % interval; explicit better",
@@ -103,19 +103,19 @@ PRIMITIVES = {p.name: p for p in [
               "Harmonic Drive hysteresis loss / torsional stiffness (CSF catalog); Nabtesco lost motion"),
     Primitive("stock.allan_variance", "characteristic", "evidence", "series", True, "overlapping Allan deviation; ARW at tau = 1 s, bias instability (min / 0.664), RRW",
               "Stamps + gyro_rad_s / accel_m_s2 at rest (hours)", "taus (log-spaced), limits per term", "IEEE 952 / 1554; Kalibr IMU noise model; allan_variance_ros"),
-    Primitive("stock.reprojection_error", "truthfulness", "distribution", "series", False, "RMS reprojection error overall and per view (px)",
+    Primitive("stock.reprojection_error", "truthfulness", "distribution", "series", True, "RMS reprojection error overall and per view (px)",
               "calibration views: detected and projected corners", "limits (px)", "OpenCV calibrateCamera RMS / perViewErrors; Kalibr report"),
-    Primitive("stock.depth_plane", "truthfulness", "threshold_band", "series", False, "fill rate, plane-fit RMS (% of Z), Z accuracy, temporal noise on a flat target",
+    Primitive("stock.depth_plane", "truthfulness", "threshold_band", "series", True, "fill rate, plane-fit RMS (% of Z), Z accuracy, temporal noise on a flat target",
               "depth frames + ROI + ground-truth distance", "roi_fraction 0.4, frames 40, limits", "NIST/Intel depth quality metrics; librealsense depth-quality tool"),
-    Primitive("stock.spectral_quality", "characteristic", "distribution", "series", False, "SNR per band; smile and keystone (px) on targets",
+    Primitive("stock.spectral_quality", "characteristic", "distribution", "series", True, "SNR per band; smile and keystone (px) on targets",
               "repeated cubes of a uniform target; bar targets", "bands, limits", "HySIS (arXiv 2411.08917); HISUI SNR spec"),
-    Primitive("stock.spectral_angle", "truthfulness", "distribution", "series", False, "spectral angle (rad) between measured and reference spectra",
+    Primitive("stock.spectral_angle", "truthfulness", "distribution", "series", True, "spectral angle (rad) between measured and reference spectra",
               "reflectance cube + reference library", "materials, max_angle", "Kruse et al. 1993 SAM"),
     Primitive("stock.stamp_delay", "health", "threshold_band", "series", True, "received - source stamp per message; early, late, zero stamps",
               "Stamps (source, received)", "min_acceptable -1 s, max_acceptable 5 s", "ROS TimeStampStatus; greenwave current_delay_from_realtime_ms"),
-    Primitive("stock.image_sharpness", "health", "threshold_band", "series", False, "variance of the Laplacian per frame (blur)", "frames (grey)", "roi, limits (site-calibrated)",
+    Primitive("stock.image_sharpness", "health", "threshold_band", "series", True, "variance of the Laplacian per frame (blur)", "frames (grey)", "roi, limits (site-calibrated)",
               "Pech-Pacheco 2000; pyimagesearch blur detection"),
-    Primitive("stock.marker_drift", "truthfulness", "threshold_band", "series", False, "a fixed tag's pixel / pose offset from its calibrated value",
+    Primitive("stock.marker_drift", "truthfulness", "threshold_band", "series", True, "a fixed tag's pixel / pose offset from its calibrated value",
               "tag detections over time + the calibrated pose", "tag_id, limits (px, mm)", "RealSense on-chip health check; io-diagnostics' 28 px camera move"),
     Primitive("stock.event_interval", "health", "kpi_trend", "scalar", True, "mean time between events (failures, interventions) over operating hours",
               "Events + operating-time intervals", "event codes, min_events", "MTBF / MTTF (reliability); medkit fault history"),
