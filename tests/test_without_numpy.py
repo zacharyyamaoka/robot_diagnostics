@@ -21,6 +21,8 @@ from robotdx.diagnostics._numpy import available
 from robotdx.diagnostics.stock import BoxConfig
 out["available"] = available()
 out["registered"] = sorted(REGISTRY)
+from robotdx.diagnostics.catalog import PRIMITIVES
+out["implemented"] = sorted(name for name, p in PRIMITIVES.items() if p.implemented)
 out["judge"] = core.judge(61.0, Limits.at_most(70.0, warn=60.0))
 line = record.to_record(core.result(BoxConfig(), value=None, unit="Cel", metric="max", limits=Limits(), title="t", message="m", code="NoChannel"))
 out["level"] = line["level"]
@@ -42,7 +44,9 @@ def test_core_registry_and_record_need_no_numpy():
     assert done.returncode == 0, done.stderr[-2000:]
     out = json.loads(done.stdout.strip().splitlines()[-1])
     assert out["numpy"] is False and out["available"] is False  # really no numpy in that environment
-    assert "stock.box" in out["registered"] and "stock.fault_codes" in out["registered"] and len(out["registered"]) == 13
+    # every primitive the catalog calls implemented registers without numpy (so a page can list and configure it)
+    assert "stock.box" in out["registered"] and "stock.fault_codes" in out["registered"]
+    assert out["implemented"] == [name for name in out["registered"] if name.startswith("stock.")] and len(out["implemented"]) >= 13
     assert out["judge"] == ["warn", "AboveWarnLimit"]
     assert out["level"] == "unknown"
     assert out["config"] == 70.0

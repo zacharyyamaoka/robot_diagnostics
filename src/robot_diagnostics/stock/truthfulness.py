@@ -10,12 +10,16 @@ truthfulness has two stock checks:
   (FT_FAQ.pdf), the Dyno note's disc-on/off run.
 - ``kt_consistency``: the board's stored Kv against an independent calibration of the same motor. CAN 14 read 1/1.229 of
   true torque until 2026-10-23 because its Kv was a firmware-conversion artifact (rack_2026-10-23/analysis/kt_can14.json).
+- ``agreement``: any reported or predicted scalar against an independent reference (OpenHTF ``within_percent``): predicted vs
+  measured top speed (T7), a thermocouple vs the board's temperature (T8), an IMU's |g| vs 9.80665 m/s2, stored vs expected config.
 """
 
 from __future__ import annotations
 
+import math
+import statistics
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any, Sequence
 
 from .._numpy import np
 
@@ -124,3 +128,78 @@ def kt_consistency(config: KtConsistencyConfig, data: KtReadings):
                   message=f"board Kv {data.kv_board_rpm_per_v:g} vs measured {data.kv_reference_rpm_per_v:g}: torque reads {ratio:.3f} of true",
                   measurements=(Measure("kv_board_over_reference", data.kv_board_rpm_per_v / data.kv_reference_rpm_per_v),),
                   evidence=(Evidence(data.reference, "kv"),) if data.reference else ())
+
+
+# ----- agreement: a reported or predicted scalar against an independent reference ----------------------------------------------
+@dataclass(frozen=True)
+class Pair:
+    reported: Any  # what the part (or a model) says: a number, or any value for mode "mismatches"
+    reference: Any  # an independent measurement of the same thing (a thermocouple, a camera, 9.80665 m/s2, the expected config)
+    key: str = ""  # what it is ("speed_max", "kp"): named in the payload
+    evidence: str = ""
+
+
+@dataclass(frozen=True)
+class AgreementConfig:
+    """OpenHTF's ``within_percent`` measurement validator, generalised: one reported scalar per pair against its reference."""
+
+    mode: str = "percent"  # percent: 100 (reported - reference) / reference | ratio: reported / reference | difference: reported - reference
+    #                        mismatches: count of pairs whose values differ by more than tolerance (or are unequal, for non-numbers)
+    combine: str = "worst"  # worst: the pair farthest from agreement (signed) | median | mean
+    tolerance: float = 0.0  # mismatches only: |reported - reference| <= tolerance agrees
+    unit: str = ""  # "" = the mode's own (% | 1 | count); set it for difference (the pair's unit)
+    limits: Limits = field(default_factory=Limits)
+
+
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) else None
+
+
+def agreement(config: AgreementConfig, pairs: Sequence[Pair]):
+    """Each pair's deviation in the mode's terms; the headline combines them (the worst by default)."""
+
+    usable = [p for p in pairs if p.reported is not None and p.reference is not None]
+    unit = config.unit or {"percent": "%", "ratio": "1", "mismatches": "count"}.get(config.mode, "1")
+    title = f"agreement ({config.mode})"
+    metric = config.mode
+    if config.mode == "mismatches":
+        if not usable:
+            return result(config, value=None, unit=unit, metric=metric, limits=config.limits, title=title,
+                          message="no pair has both a reported and a reference value", code="NoReference")
+        mismatched = []
+        for p in usable:
+            a, b = _number(p.reported), _number(p.reference)
+            same = abs(a - b) <= config.tolerance if a is not None and b is not None else p.reported == p.reference
+            if not same:
+                mismatched.append(p.key)
+        return result(config, value=len(mismatched), unit=unit, metric=metric, limits=config.limits, title=title, better="lower",
+                      message=f"{len(mismatched)} of {len(usable)} differ" + (f": {', '.join(mismatched)}" if mismatched else ""),
+                      measurements=(Measure("pairs", len(usable)),), payload={"mismatched": mismatched},
+                      evidence=tuple(Evidence(p.evidence, p.key) for p in usable if p.evidence),
+                      why="read the differing keys back from the device; a stored value that disagrees is a config that was never written")
+    deviations, keys, unusable = [], [], 0
+    for p in usable:
+        a, b = _number(p.reported), _number(p.reference)
+        if a is None or b is None or (config.mode in ("percent", "ratio") and b == 0.0):
+            unusable += 1
+            continue
+        deviations.append(100.0 * (a - b) / b if config.mode == "percent" else a / b if config.mode == "ratio" else a - b)
+        keys.append(p.key)
+    if not deviations:
+        return result(config, value=None, unit=unit, metric=metric, limits=config.limits, title=title,
+                      message="no pair has a numeric reported value and a usable (non-zero) reference", code="NoReference")
+    ideal = 1.0 if config.mode == "ratio" else 0.0
+    if config.combine == "worst":
+        value = max(deviations, key=lambda d: abs(d - ideal))
+    elif config.combine == "median":
+        value = float(statistics.median(deviations))
+    else:
+        value = float(statistics.fmean(deviations))
+    return result(config, value=value, unit=unit, metric=metric, limits=config.limits, title=title,
+                  message=f"{config.combine} {config.mode} over {len(deviations)} pair(s): {value:.4g} {unit}",
+                  measurements=(Measure("pairs", len(deviations)), Measure("unusable", unusable)),
+                  payload={"breakdown": {"keys": keys, "values": deviations}},
+                  evidence=tuple(Evidence(p.evidence, p.key) for p in usable if p.evidence),
+                  why="check the reference first (its own calibration), then the part's scale factor")

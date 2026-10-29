@@ -19,7 +19,7 @@ from typing import Any, Mapping, Sequence
 from ._numpy import np
 
 MODE_POSITION = 10  # moteus mode 10 = position control: the rows a controller was actually tracking
-COLUMNS = ("q_rad", "q_target_rad", "qd_rad_s", "qd_target_rad_s", "tau_nm", "i_q_a", "mode", "fault", "temp_c", "v_bus_v")
+COLUMNS = ("q_rad", "q_target_rad", "qd_rad_s", "qd_target_rad_s", "tau_nm", "i_q_a", "mode", "fault", "temp_c", "v_bus_v", "tau_ff_nm")
 # A measured column and its commanded twin (the target situation's column, carried on the same clock)
 TARGET_OF = {"q_rad": "q_target_rad", "qd_rad_s": "qd_target_rad_s"}
 
@@ -37,6 +37,7 @@ class Trajectory:
     fault: np.ndarray | None = None
     temp_c: np.ndarray | None = None
     v_bus_v: np.ndarray | None = None
+    tau_ff_nm: np.ndarray | None = None  # the feed-forward torque each command carried, same frame as tau_nm (stock.feedback_share)
     run: str = ""  # a stable, unique id (for the rack, the npz path): every Result's evidence pointer
     device: str = ""  # "CAN 12"
     situation: str = "real"  # real | target | "twin v7" | "perfect servo" ...: one series on screen

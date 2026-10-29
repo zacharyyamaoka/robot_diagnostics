@@ -26,11 +26,32 @@ def load(path: Path | str, *, labels: Mapping[str, Any] | None = None) -> Trajec
     with np.load(path) as archive:
         arrays = {COLUMN_OF.get(name, name): np.asarray(archive[name], float) for name in ("t", *COLUMN_OF) if name in archive.files}
         wall = float(archive["wall"][0]) if "wall" in archive.files and archive["wall"].size else None
+        cogging = np.asarray(archive["ff_cog_nm"], float) if "ff_cog_nm" in archive.files else None
     args = meta.get("args") or {}
+    if meta and "qd_target_rad_s" in arrays:
+        arrays["tau_ff_nm"] = feedforward_nm(args, arrays["qd_target_rad_s"], cogging)
     merged = {"can_id": meta.get("can_id"), "kind": meta.get("kind"), "ff_coulomb_nm": float(args.get("ff_coulomb_nm") or 0.0),
               "wall_start": wall, **(labels or {})}
     device = f"CAN {meta['can_id']}" if meta.get("can_id") is not None else ""
     return Trajectory(run=str(path), device=device, prelude_s=float(meta.get("prelude_s") or 0.0), labels=merged, **arrays)
+
+
+def feedforward_nm(args: Mapping[str, Any], qd_target: np.ndarray, cogging: np.ndarray | None = None) -> np.ndarray:
+    """The feed-forward torque each command carried (board frame, N.m): the runner's Coulomb term ``ff_coulomb_nm * tanh(qd_target /
+    ff_band_rad_s)`` plus the logged rotor-keyed cogging term ``ff_cog_nm`` (0 where none was sent).
+
+    WHY this formula: it is bam_rack_twin's ``evidence.coulomb_feedforward_output_nm`` + ``logged_feedforward_output_nm`` (band 0.05 rad/s
+    when the run did not say). bam_rack_twin applies them in the joint output frame; the station's output map is a linear scale
+    (``output_torque = board / output_per_board``, ``output_angle = board * output_per_board``), so the tanh argument and every
+    torque ratio are the same in the board frame."""
+
+    qd_target = np.asarray(qd_target, float)
+    coulomb = float(args.get("ff_coulomb_nm") or 0.0)
+    band = float(args.get("ff_band_rad_s") or 0.05)
+    out = coulomb * np.tanh(qd_target / band) if coulomb else np.zeros_like(qd_target)
+    if cogging is not None and cogging.size == out.size:
+        out = out + np.nan_to_num(cogging, nan=0.0)
+    return out
 
 
 def camera_stamps(path: Path | str) -> Stamps:

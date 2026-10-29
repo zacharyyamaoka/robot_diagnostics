@@ -10,10 +10,12 @@ from __future__ import annotations
 from ..registry import Spec, register
 from ..rollup import GateMatrixConfig, RollupConfig, gate_matrix, rollup
 from .coverage import CoverageConfig, coverage
+from .events import EventIntervalConfig, ShareConfig, StalenessConfig, event_interval, share, staleness
+from .feedback import FeedbackShareConfig, feedback_share
 from .fidelity import FidelityRatioConfig, FloorConfig, ModelErrorConfig, fidelity_ratio, model_error, repeatability_floor
-from .health import BoxConfig, FaultCodesConfig, RateConfig, box, fault_codes, sample_rate
+from .health import BoxConfig, FaultCodesConfig, RateConfig, StampDelayConfig, box, fault_codes, sample_rate, stamp_delay
 from .tracking import StopErrorConfig, TrackingErrorConfig, stop_error, tracking_error
-from .truthfulness import KnownLoadConfig, KtConsistencyConfig, known_load_gain, kt_consistency
+from .truthfulness import AgreementConfig, KnownLoadConfig, KtConsistencyConfig, agreement, known_load_gain, kt_consistency
 
 STOCK = [
     Spec("stock.tracking_error", tracking_error, TrackingErrorConfig, "tracking error", "real_vs_target", "driver", "kpi_trend", "scalar", "mrad",
@@ -44,6 +46,19 @@ STOCK = [
          summary="a composite's own verdict from its members; caused_by names them"),
     Spec("stock.gate_matrix", gate_matrix, GateMatrixConfig, "gate matrix", "rollup", "headline", "gate_matrix", "matrix", "1",
          summary="subjects x gates; headline = passing cells"),
+    # ---- the catalog's specified primitives (2026-10-28) ----
+    Spec("stock.feedback_share", feedback_share, FeedbackShareConfig, "feedback share", "sim_vs_real", "driver", "kpi_trend", "scalar", "1",
+         summary="RMS(tau - tau_ff) / RMS(tau) over controlled rows: what the feedback loop still supplies (bam_rack_twin vt_kpi)"),
+    Spec("stock.share", share, ShareConfig, "share", "real_vs_target", "health", "kpi_trend", "scalar", "1",
+         summary="share of true events with its Wilson interval and an explicit better (Zach's PercentTask, fixed)"),
+    Spec("stock.agreement", agreement, AgreementConfig, "agreement", "truthfulness", "health", "kpi_trend", "scalar", "%",
+         summary="a reported or predicted scalar vs an independent reference: % error, ratio, difference or mismatches"),
+    Spec("stock.stamp_delay", stamp_delay, StampDelayConfig, "stamp delay", "health", "health", "threshold_band", "series", "s",
+         summary="received - source stamp per message; early, late and zero stamps fail (ROS TimeStampStatus)"),
+    Spec("stock.event_interval", event_interval, EventIntervalConfig, "mean time between events", "health", "health", "kpi_trend", "scalar", "h",
+         summary="operating time / events (MTBF, MTTI); with no events, a lower bound judged as one"),
+    Spec("stock.staleness", staleness, StalenessConfig, "evidence age", "health", "health", "level_history", "series", "h",
+         summary="age of each gate's newest evidence vs its validity window; a gate without evidence is never green"),
 ]
 
 for _spec in STOCK:

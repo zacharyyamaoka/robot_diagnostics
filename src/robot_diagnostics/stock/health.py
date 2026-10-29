@@ -12,7 +12,7 @@ from typing import Sequence
 
 from .._numpy import np
 
-from ..core import FAIL, PASS, WARN, Evidence, Limits, Measure, judge, result, worst
+from ..core import FAIL, NOT_RUN, PASS, WARN, Evidence, Limits, Measure, judge, result, worst
 from ..data import Trajectory
 
 
@@ -130,6 +130,66 @@ def sample_rate(config: RateConfig, data: Sequence[Stamps]):
                   evidence=tuple(Evidence(row["id"], "t") for row in rows))
 
 
+@dataclass(frozen=True)
+class StampPairs:
+    source: np.ndarray  # s: the stamp the producer wrote (header.stamp, a camera's hardware clock mapped to wall time)
+    received: np.ndarray  # s: when this host received it, on the same clock
+    source_id: str = ""
+
+
+@dataclass(frozen=True)
+class StampDelayConfig:
+    """ROS ``diagnostic_updater::TimeStampStatus``: a message whose (received - source) delay is outside [min, max] is an error, and so is a
+    zero stamp (an unset header). Defaults are ROS's own (``TimeStampStatusParam``: -1 s, 5 s)."""
+
+    min_acceptable_s: float = -1.0  # earlier than this = a stamp from the future (clock skew)
+    max_acceptable_s: float = 5.0  # later than this = a late message
+    statistic: str = "max"  # max | p99 | median | mean: the headline delay over every message
+    zero_is_error: bool = True  # ROS: "Zero timestamp seen" is an error
+
+
+def stamp_delay(config: StampDelayConfig, data: Sequence[StampPairs]):
+    """Per message delay = received - source; early, late and zero stamps counted; any of them fails, as in ROS."""
+
+    delays, zeros, evidence = [], 0, []
+    for stream in data:
+        source, received = np.asarray(stream.source, float), np.asarray(stream.received, float)
+        if source.size == 0 or source.size != received.size:
+            continue
+        zero = source == 0.0
+        zeros += int(zero.sum())
+        keep = ~zero & np.isfinite(source) & np.isfinite(received)
+        delays.append(received[keep] - source[keep])
+        evidence.append(Evidence(stream.source_id, "received - source"))
+    limits = Limits(error_low=config.min_acceptable_s, error_high=config.max_acceptable_s)
+    title = "stamp delay"
+    delay = np.concatenate(delays) if delays else np.zeros(0)
+    if delay.size == 0 and not zeros:
+        return result(config, value=None, unit="s", metric=f"delay_{config.statistic}", limits=limits, title=title,
+                      message="no stamp pairs", code="NoStamps")
+    stats = {"max": np.max, "median": np.median, "mean": np.mean, "p99": lambda d: np.percentile(d, 99)}
+    value = float(stats[config.statistic](delay)) if delay.size else None
+    early, late = int(np.sum(delay < config.min_acceptable_s)), int(np.sum(delay > config.max_acceptable_s))
+    if late:
+        verdict, code = FAIL, "LateStamps"
+    elif early:
+        verdict, code = FAIL, "EarlyStamps"
+    elif zeros and config.zero_is_error:
+        verdict, code = FAIL, "ZeroStamps"
+    else:
+        verdict, code = (PASS, "") if value is not None else (NOT_RUN, "NoStamps")
+    # at most ~400 points, always with the worst message in
+    order = np.unique(np.concatenate([np.linspace(0, delay.size - 1, 400).astype(int), [int(np.argmax(delay))]])) if delay.size > 400 else np.arange(delay.size)
+    return result(config, value=value, unit="s", metric=f"delay_{config.statistic}", limits=limits, title=title, verdict=verdict, code=code,
+                  message=f"{delay.size} messages: {config.statistic} delay {value if value is None else f'{value:.4g}'} s; "
+                          f"{late} late (> {config.max_acceptable_s:g} s), {early} early (< {config.min_acceptable_s:g} s), {zeros} zero stamps",
+                  measurements=(Measure("late", late), Measure("early", early), Measure("zero", zeros), Measure("messages", int(delay.size)),
+                                Measure("median", float(np.median(delay)) if delay.size else None, "s")),
+                  payload={"x": [int(i) for i in order], "y": delay[order].tolist(), "x_label": "message",
+                           "y_label": "received - source (s)"},
+                  evidence=tuple(evidence), why="a steady delay is a pipeline queue; a jump is a clock step (check chrony/PTP on both ends)")
+
+
 # moteus fw/error.h (docs/protocol/registers.md, 0x00f): valid as faults in mode 1; 96-105 are limiters in running modes.
 MOTEUS_CODES = {
     32: "calibration fault", 33: "motor driver fault", 34: "over voltage", 35: "encoder fault", 36: "motor not configured",
@@ -188,4 +248,4 @@ def fault_codes(config: FaultCodesConfig, runs: Sequence[Trajectory]):
                   evidence=tuple(Evidence(run.run, "fault") for run in runs if run.fault is not None))
 
 
-__all__ = ["BoxConfig", "box", "RateConfig", "Stamps", "sample_rate", "FaultCodesConfig", "fault_codes", "MOTEUS_CODES", "FAIL"]
+__all__ = ["BoxConfig", "box", "RateConfig", "Stamps", "sample_rate", "StampPairs", "StampDelayConfig", "stamp_delay", "FaultCodesConfig", "fault_codes", "MOTEUS_CODES", "FAIL"]
