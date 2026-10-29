@@ -53,6 +53,10 @@ def repeatability_floor(config: FloorConfig, repeats: Sequence[Trajectory]):
     if len(repeats) < 2:
         return result(config, value=None, unit=config.unit, metric="floor", limits=config.limits, title=title,
                       message=f"{len(repeats)} repeat(s): a floor needs at least 2", code="TooFewRepeats")
+    missing = [run.run or "a repeat" for run in repeats if not run.has(config.channel)]
+    if missing:  # WHY not run, never a KeyError: a part whose runs lack the channel has no floor yet, which is not a broken diagnostic
+        return result(config, value=None, unit=config.unit, metric="floor", limits=config.limits, title=title,
+                      message=f"{len(missing)} of {len(repeats)} repeats have no {config.channel} column", code="NoChannel")
     series = [_signal(run, config.channel, config.relative_to_target, config.skip_prelude) for run in repeats]
     pairs = pairwise_rms(series, clock=config.clock, dt=config.dt)
     values = [config.scale * value for _, _, value in pairs]

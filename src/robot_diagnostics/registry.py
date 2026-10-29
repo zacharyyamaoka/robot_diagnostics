@@ -17,7 +17,9 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from .core import CONSUMERS, EMITS, FAMILIES, HINTS, ROLES, Limits, Result
+from .core import CONSUMERS, EMITS, FAMILIES, HINTS, ROLES, Limits, Result, result
+
+NO_DATA = "NoData"  # evaluate(..., data=None): the inputs are absent, so the diagnostic is not run
 
 ENTRY_POINT_GROUP = "robotdx.diagnostics"
 
@@ -89,7 +91,14 @@ def evaluate(name: str, config: Any, data: Any, *, subject: str, stamp: float | 
     spec = REGISTRY[name]
     if not isinstance(config, spec.config_type):
         raise TypeError(f"{name} takes a {spec.config_type.__name__}, got {type(config).__name__}")
-    out = spec.function(config, data)
+    # WHY here and not in each primitive: "inputs absent" is one answer for all 30 (not run, never a guessed pass), and a
+    # caller that has nothing to pass (a host whose State does not carry this input) needs no fixture of the right shape
+    if data is None:
+        limits = getattr(config, "limits", None)
+        out = result(config, value=None, unit=spec.unit, metric="value", limits=limits if isinstance(limits, Limits) else Limits(),
+                     title=spec.title, message=f"no input: {spec.title} needs its data ({spec.summary or spec.name})", code=NO_DATA)
+    else:
+        out = spec.function(config, data)
     out = replace(out, diagnostic=name, subject=subject, family=spec.family, role=spec.role, hint=spec.hint,
                   emits=spec.emits, view_extra=spec.view_extra, stamp=stamp if stamp is not None else out.stamp)
     problem = _payload_problem(spec, out)
@@ -111,12 +120,16 @@ def config_from_dict(config_type: type, values: Mapping[str, Any]):
         if hint is Limits or (isinstance(value, Mapping) and set(value) <= {"warn_low", "warn_high", "error_low", "error_high"}):
             value = Limits(**value)
         elif isinstance(value, list):
-            value = tuple(value)
+            value = _tuples(value)  # WHY deep: a tuple of pairs (staleness valid_for) comes back from TOML as lists of lists
         kwargs[spec.name] = value
     unknown = set(values) - {spec.name for spec in dataclasses.fields(config_type)}
     if unknown:
         raise ValueError(f"{config_type.__name__} has no field(s) {sorted(unknown)}")
     return config_type(**kwargs)
+
+
+def _tuples(value):
+    return tuple(_tuples(item) for item in value) if isinstance(value, (list, tuple)) else value
 
 
 def _resolve(dotted: str):

@@ -72,7 +72,8 @@ def gate_matrix(config: GateMatrixConfig, cells: Sequence[tuple[str, str, Result
     culprits = tuple(dict.fromkeys(table[(s, g)].subject for s in rows for g in cols
                                    if (s, g) in table and table[(s, g)].verdict != PASS and table[(s, g)].subject))
     code = {PASS: "", WARN: "CellsDegraded", FAIL: "CellsFailing", NOT_RUN: "CellsNotRun"}[verdict]
-    return result(config, value=passing, unit="1", metric="cells_passing", limits=Limits(), title=config.title, verdict=verdict, code=code,
+    # WHY None with no cells: "0 passing" of nothing is no measurement, and a not_run carries no number (catalog test)
+    return result(config, value=passing if total else None, unit="1", metric="cells_passing", limits=Limits(), title=config.title, verdict=verdict, code=code,
                   message=f"{passing} of {total} cells pass",
                   measurements=(Measure("cells", total),
                                 Measure("not_run", sum(v == NOT_RUN for row in grid for v in row))),

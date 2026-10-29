@@ -457,3 +457,77 @@ def problems() -> list[str]:
         if entry.prov not in ("his", "his code", "agent", "proposed") or not entry.quote or not entry.where:
             found.append(f"{entry.id}: provenance needs prov, quote and where")
     return found
+
+
+# ----- ready to run: each entry's default config (defaults.py) and the proposed-limit rule ------------------------------------------
+def entry(entry_id: str) -> Entry:
+    found = next((item for item in ENTRIES if item.id == entry_id), None)
+    if found is None:
+        raise KeyError(f"no catalog entry {entry_id!r}")
+    return found
+
+
+def default(entry_id: str):
+    """The entry's ``defaults.Default``: its config instance and where its thresholds come from."""
+
+    from .defaults import DEFAULTS
+
+    return DEFAULTS[entry(entry_id).id]
+
+
+def config(entry_id: str):
+    """A ready config instance for the entry (frozen: ``dataclasses.replace`` it to change a value)."""
+
+    return default(entry_id).config
+
+
+def _limits_of(config_value) -> dict:
+    import dataclasses
+
+    from .core import Limits
+
+    return {f.name: getattr(config_value, f.name) for f in dataclasses.fields(config_value) if isinstance(getattr(config_value, f.name), Limits)}
+
+
+def gating(entry_id: str, config_value=None) -> bool:
+    """Whether a fail may fail. Zach's thresholds gate; an agent's or a proposed one never does (Zach: proposed entries show but never
+    gate) until a person sets a limit of their own, i.e. any Limits that differs from the default's."""
+
+    found = default(entry_id)
+    if found.gating or config_value is None:
+        return found.gating
+    return _limits_of(config_value) != _limits_of(found.config)
+
+
+def advisory(result_value, entry_id: str):
+    """A non-gating entry's warn or fail from crossing its limits becomes a warning that says the limit is proposed: shown, never a gate.
+    A pass, a not_run, any other finding and a gating entry are returned unchanged."""
+
+    from dataclasses import replace
+
+    from .core import FAIL, WARN
+
+    # WHY only a limit's verdict: a warn or fail for another reason (encoder side only, too few repeats) is the primitive's own finding,
+    # not a threshold anyone proposed
+    if result_value.verdict not in (WARN, FAIL) or not result_value.code.endswith(("ErrorLimit", "WarnLimit")):
+        return result_value
+    found = default(entry_id)
+    code = result_value.code if result_value.code.startswith("Proposed") else f"Proposed{result_value.code}"
+    note = f"beyond a {found.limits} limit, not a gate until Zach sets it" + (f" ({found.source})" if found.source else "")
+    return replace(result_value, verdict=WARN, code=code, message=f"{result_value.message} [{note}]")
+
+
+def evaluate(entry_id: str, data, *, subject: str, stamp: float | None = None, config_value=None):
+    """Run one catalog entry: its primitive with its default config (or ``config_value``), titled as the entry, and the proposed-limit rule
+    applied. ``data`` None = its inputs are absent: not run."""
+
+    from dataclasses import replace
+
+    from .registry import evaluate as run
+
+    item = entry(entry_id)
+    chosen = config(entry_id) if config_value is None else config_value
+    out = run(item.primitive, chosen, data, subject=subject, stamp=stamp)
+    out = replace(out, diagnostic=item.id, title=item.title, role=item.role, hint=item.the_hint, family=item.the_family,
+                  view_extra=item.view_extra or out.view_extra)
+    return out if gating(entry_id, chosen) else advisory(out, entry_id)
