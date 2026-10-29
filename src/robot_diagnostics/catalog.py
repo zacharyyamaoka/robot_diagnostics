@@ -521,13 +521,19 @@ def evaluate(entry_id: str, data, *, subject: str, stamp: float | None = None, c
     """Run one catalog entry: its primitive with its default config (or ``config_value``), titled as the entry, and the proposed-limit rule
     applied. ``data`` None = its inputs are absent: not run."""
 
-    from dataclasses import replace
-
     from .registry import evaluate as run
 
-    item = entry(entry_id)
     chosen = config(entry_id) if config_value is None else config_value
-    out = run(item.primitive, chosen, data, subject=subject, stamp=stamp)
-    out = replace(out, diagnostic=item.id, title=item.title, role=item.role, hint=item.the_hint, family=item.the_family,
-                  view_extra=item.view_extra or out.view_extra)
+    out = dress(run(entry(entry_id).primitive, chosen, data, subject=subject, stamp=stamp), entry_id)
     return out if gating(entry_id, chosen) else advisory(out, entry_id)
+
+
+def dress(result_value, entry_id: str, *, title: str | None = None):
+    """The entry's own view of a primitive's Result: its id, title, role, family and data-ui hint (an entry may override the primitive's,
+    as rack.uptime draws an event interval as a level_history)."""
+
+    from dataclasses import replace
+
+    item = entry(entry_id)
+    return replace(result_value, diagnostic=item.id, title=item.title if title is None else title, role=item.role, hint=item.the_hint,
+                   family=item.the_family, view_extra=item.view_extra or result_value.view_extra)
