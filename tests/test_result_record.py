@@ -83,6 +83,6 @@ def test_trajectory_rows_end_in_their_unit_and_difference_stays_on_a():
     assert len(diffs) == real.t.size and diffs[0]["e_q_mrad"] == pytest.approx(-2.0) and diffs[0]["reference"] == "target"
     shorter = target.as_situation(target.q_rad, "target", "target")
     from dataclasses import replace
-    short = replace(shorter, t=shorter.t[:300], q_rad=shorter.q_rad[:300])
+    short = replace(shorter, t=shorter.t[:300], q_rad=shorter.q_rad[:300], qd_rad_s=shorter.qd_rad_s[:300], tau_nm=shorter.tau_nm[:300])
     assert len(diff_rows(real, short)) == 300  # never extrapolates past b's span
     assert np.isfinite([d["e_q_mrad"] for d in diffs]).all()

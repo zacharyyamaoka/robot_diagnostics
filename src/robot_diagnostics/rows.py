@@ -71,9 +71,23 @@ def sample_rows(run: Trajectory, *, every: int = 1) -> list[dict]:
     return out
 
 
-def diff_rows(a: Trajectory, b: Trajectory) -> list[dict]:
-    """``diff_samples.json`` rows: e_q_mrad = b - a at a's own sample times (PEP 0010 §4.4)."""
+def _finite_or_none(value: float) -> float | None:
+    return float(value) if math.isfinite(value) else None
 
-    t, e = difference((a.t - a.t[0], a.q_rad), (b.t - b.t[0], b.q_rad))
-    return [{"t": float(ti), "run": a.run, "situation": a.situation, "reference": b.situation, "device": a.device,
-             "e_q_mrad": float(1e3 * ei)} for ti, ei in zip(t, e)]
+
+def diff_rows(a: Trajectory, b: Trajectory) -> list[dict]:
+    """``diff_samples.json`` rows: b - a at a's own sample times inside b's span (PEP 0010 §4.4; data-ui's
+    gallery/robotics difference fixture, tests/fixtures/data_ui_difference): ``e_q_mrad``, plus ``e_qd_deg_s`` and
+    ``e_tau_nm`` when both runs carry the channel; a null on either side is null in the row."""
+
+    # WHY a and b keep their own t, not t - t[0]: both are on one run clock (CONTRACT §5 pairs rows by time), so zeroing each
+    # at its own first sample moves a run that starts before b by that lead and pairs the wrong samples (146 mrad on the fixture).
+    channels = [("e_q_mrad", "q_rad", 1e3)]
+    if a.has("qd_rad_s") and b.has("qd_rad_s"):
+        channels.append(("e_qd_deg_s", "qd_rad_s", 180.0 / math.pi))
+    if a.has("tau_nm") and b.has("tau_nm"):
+        channels.append(("e_tau_nm", "tau_nm", 1.0))
+    t = difference((a.t, a.channel(channels[0][1])), (b.t, b.channel(channels[0][1])))[0]
+    errors = {column: difference((a.t, a.channel(name)), (b.t, b.channel(name)))[1] * scale for column, name, scale in channels}
+    return [{"t": float(ti), "run": a.run, "situation": a.situation, "source": a.source, "reference": b.situation, "device": a.device,
+             **{column: _finite_or_none(values[i]) for column, values in errors.items()}} for i, ti in enumerate(t)]
