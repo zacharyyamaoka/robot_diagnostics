@@ -9,10 +9,13 @@ from __future__ import annotations
 
 from ..registry import Spec, register
 from ..rollup import GateMatrixConfig, RollupConfig, gate_matrix, rollup
+from .characteristic import AllanConfig, HysteresisConfig, allan_variance, hysteresis_loop
 from .coverage import CoverageConfig, coverage
 from .events import EventIntervalConfig, ShareConfig, StalenessConfig, event_interval, share, staleness
 from .feedback import FeedbackShareConfig, feedback_share
 from .fidelity import FidelityRatioConfig, FloorConfig, ModelErrorConfig, fidelity_ratio, model_error, repeatability_floor
+from .iso9283 import PathAccuracyConfig, PoseAccuracyConfig, path_accuracy, pose_accuracy
+from .response import StepResponseConfig, step_response
 from .health import BoxConfig, FaultCodesConfig, RateConfig, StampDelayConfig, box, fault_codes, sample_rate, stamp_delay
 from .tracking import StopErrorConfig, TrackingErrorConfig, stop_error, tracking_error
 from .truthfulness import AgreementConfig, KnownLoadConfig, KtConsistencyConfig, agreement, known_load_gain, kt_consistency
@@ -59,6 +62,18 @@ STOCK = [
          summary="operating time / events (MTBF, MTTI); with no events, a lower bound judged as one"),
     Spec("stock.staleness", staleness, StalenessConfig, "evidence age", "health", "health", "level_history", "series", "h",
          summary="age of each gate's newest evidence vs its validity window; a gate without evidence is never green"),
+    Spec("stock.step_response", step_response, StepResponseConfig, "step response", "real_vs_target", "driver", "threshold_band", "series", "%",
+         summary="overshoot, 10-90 % rise and 2 % settling time per move (MATLAB stepinfo; ISO 9283 overshoot / stabilisation time)"),
+    Spec("stock.pose_accuracy", pose_accuracy, PoseAccuracyConfig, "pose accuracy (ISO 9283)", "real_vs_target", "driver", "distribution", "series", "mm",
+         summary="ISO 9283 AP (barycentre vs command) and RP (l + 3 S_l) per pose; the worst pose heads"),
+    Spec("stock.path_accuracy", path_accuracy, PathAccuracyConfig, "path accuracy (ISO 9283)", "real_vs_target", "driver", "path_overlay", "series", "mm",
+         summary="ISO 9283 AT_P / RT_P over index-aligned cycles; per-point error as the overlay"),
+    Spec("stock.hysteresis_loop", hysteresis_loop, HysteresisConfig, "torque-angle loop", "characteristic", "driver", "evidence", "series", "arcmin",
+         view_extra="xy loop, torque vs angle: the width at zero torque and the slopes are the finding",
+         summary="gap at zero torque (lost motion), stiffness K1..K3 or pre-sliding compliance from the loop's legs"),
+    Spec("stock.allan_variance", allan_variance, AllanConfig, "Allan deviation", "characteristic", "driver", "evidence", "series", "rad/s/sqrt(Hz)",
+         view_extra="log-log Allan deviation vs tau: the slopes are the noise terms",
+         summary="overlapping Allan deviation (IEEE 952); N at tau 1 s, B = floor / 0.664, K at tau 3 s"),
 ]
 
 for _spec in STOCK:

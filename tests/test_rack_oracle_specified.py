@@ -30,7 +30,7 @@ from conftest import RACK, needs_rack
 
 pytestmark = needs_rack
 DAY24 = RACK / "rack_2026-10-24"
-PRESLIDING = RACK / "rack_2026-10-28" / "physical" / "presliding_can12_can13"
+PRESLIDING_SESSION = RACK / "rack_2026-10-28" / "physical" / "presliding_can12_can13"
 A28 = RACK / "rack_2026-10-28" / "analysis"
 
 # vt_kpi.feedback_share_points, rounded by it to 4 dp (value per motor; "median" is its own roll-up over the 8 motors)
@@ -73,3 +73,67 @@ def test_the_feedback_share_ruler_can_fail():
     assert out.value == pytest.approx(1.0) and abs(out.value - PUBLISHED_FEEDBACK_SHARE[13]) > 0.1
     bare = [replace(run, tau_ff_nm=None) for run in runs]
     assert evaluate("stock.feedback_share", FeedbackShareConfig(), bare, subject="rack/can13").verdict == NOT_RUN
+
+
+# ----- 10-28 pre-sliding session (physical/presliding_can12_can13; integral off, no feed-forward) ----------------------------------
+# bam_rack_twin presliding_round2_can{12,13}.json "direct": median stuck-leg slope of fine q on the push, over the session's waypoint runs
+PUBLISHED_COMPLIANCE = {12: (0.6316627031218227, (0.49427753211848, 0.8297959432363987)),
+                        13: (0.28289887241557826, (0.2523712685411179, 0.38790059657589926))}
+ROTOR_PER_OUTPUT = 10.0  # both stations' boards are configured with ratio 0.1 (q = 0.1 x rotor angle; measured slope 0.09999 / -0.09996)
+ROTOR_SIGN = {12: 1.0, 13: -1.0}  # round4_study.rotor_relation's measured slopes: CAN 13's rotor turns the other way
+
+
+def _fine(path: Path, can: int):
+    """The run with q_rad from the rotor encoder (rotor_rev / ratio): the board's q is quantised to ~0.1 mrad, the rotor is not.
+    The same construction as presliding_round2.fine_q (unwrapped rotor angle / ratio, offset to the board's q by the median)."""
+
+    run = load(path)
+    with np.load(path) as archive:
+        rotor = np.asarray(archive["rotor_rev"], float)
+    angle = ROTOR_SIGN[can] * np.unwrap(2 * np.pi * rotor) / ROTOR_PER_OUTPUT
+    return replace(run, q_rad=angle + float(np.median(run.q_rad - angle)))
+
+
+# round2's stuck_legs rule as config: target legs after the prelude + 0.5 s, 7-row means, 4 rows trimmed, >= 20 rows, push span
+# >= 0.15 N.m, the joint within 0.6 mrad of the leg's start on >= 95 % of rows; the leg-median slope
+PRESLIDING = dict(legs="target", stiffness="leg_median", headline="compliance", smooth_rows=7, trim_rows=4, min_leg_rows=20,
+                  min_torque_span_nm=0.15, max_leg_travel_rad=0.6e-3, travel_share=0.95, skip_s=0.5)
+
+
+@pytest.mark.parametrize("can", [12, 13])
+def test_presliding_compliance_matches_bam_rack_twin(can):
+    from robotdx.diagnostics.stock import HysteresisConfig
+
+    runs = [_fine(path, can) for path in sorted((PRESLIDING_SESSION / "runs").glob(f"*_can{can}_waypoints.npz"))]
+    out = evaluate("stock.hysteresis_loop", HysteresisConfig(**PRESLIDING), runs, subject=f"rack/can{can}")
+    published, (low, high) = PUBLISHED_COMPLIANCE[can]
+    assert {m.key: m.value for m in out.measurements}["legs"] == 8  # round2's stuck_legs: 8 per station
+    # WHY 1 %, not exact: round2 also subtracts the plant's fitted cogging ripple from the push (coefficients from its own fit, not
+    # data this library reads); on stuck legs the rotor barely turns, so that term moves the median slope by < 0.5 %
+    assert out.value == pytest.approx(published, rel=0.01) and low <= out.value <= high
+
+
+def test_presliding_compliance_ruler_can_fail():
+    # without round2's "still stuck" box the legs that slid come in (12, not 8) and the compliance moves off the published number:
+    # the selection rule is part of the ruler, and the check notices when it changes
+    from robotdx.diagnostics.stock import HysteresisConfig
+
+    runs = [_fine(path, 12) for path in sorted((PRESLIDING_SESSION / "runs").glob("*_can12_waypoints.npz"))]
+    slid = evaluate("stock.hysteresis_loop", HysteresisConfig(**{**PRESLIDING, "max_leg_travel_rad": None}), runs, subject="rack/can12")
+    assert {m.key: m.value for m in slid.measurements}["legs"] == 12
+    assert abs(slid.value - PUBLISHED_COMPLIANCE[12][0]) > 0.05
+
+
+def test_step_response_on_the_velocity_plateaus_runs_and_finds_no_settled_reversal_at_001_rad_s():
+    """No published number to match: what the session itself found ("nothing slides at 0.01 rad/s in 2 s") must show as an unsettled
+    reversal into the -0.01 rad/s plateau, on both stations."""
+
+    from robotdx.diagnostics.stock import StepResponseConfig
+
+    for can, name in ((12, "s08_can12_friction"), (13, "s16_can13_friction")):
+        run = load(PRESLIDING_SESSION / "runs" / f"{name}.npz")
+        out = evaluate("stock.step_response", StepResponseConfig(channel="qd_rad_s", headline="settling", settle_band=0.1, skip_prelude=False),
+                       [run], subject=f"rack/can{can}")
+        sizes, settled = out.payload["size"], out.payload["settled"]
+        assert len(sizes) == 7 and sizes[0] == pytest.approx(-0.02)  # +0.01 -> -0.01 rad/s, then up the ladder
+        assert settled[0] is False and out.code == "NotSettled"
