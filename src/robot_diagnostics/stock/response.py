@@ -19,14 +19,14 @@ from typing import Sequence
 from .._numpy import np
 
 from ..core import NOT_RUN, PASS, WARN, Evidence, Limits, Measure, judge, result, worst
-from ..data import TARGET_OF, Trajectory
+from ..data import Trajectory, target_of
 
 UNITS = {"overshoot": "%", "rise": "s", "settling": "s"}
 
 
 @dataclass(frozen=True)
 class StepResponseConfig:
-    channel: str = "q_rad"  # q_rad (position moves) or qd_rad_s (velocity steps); its target is data.TARGET_OF[channel]
+    channel: str = "q_rad"  # q_rad (position moves) or qd_rad_s (velocity steps); its target is data.target_of(channel)
     hold_min_s: float = 0.2  # a target level held at least this long is a move's start or end
     min_step: float = 1e-6  # smaller level changes are not moves (channel units)
     settle_band: float = 0.02  # fraction of the move's size: the textbook 2 % band
@@ -88,7 +88,7 @@ def _settling(t: np.ndarray, y: np.ndarray, final: float, band: float, t_arrive:
 def step_response(config: StepResponseConfig, runs: Sequence[Trajectory]):
     """Per move: overshoot (%), rise time (s), settling time (s); the headline is the worst (or median) move."""
 
-    target_name = TARGET_OF.get(config.channel, "")
+    target_name = target_of(config.channel)
     moves, evidence = [], []
     title = f"step response ({config.channel})"
     have_target = False

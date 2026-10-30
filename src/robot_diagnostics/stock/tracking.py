@@ -13,13 +13,13 @@ from typing import Sequence
 from .._numpy import np
 
 from ..core import NOT_RUN, WARN, Evidence, Limits, Measure, result
-from ..data import TARGET_OF, Trajectory, center, rms
+from ..data import Trajectory, center, rms, target_of
 
 
 @dataclass(frozen=True)
 class TrackingErrorConfig:
     statistic: str = "rms"  # rms | p95 | max | final (mean |e| over the last final_window_s)
-    channel: str = "q_rad"  # q_rad (position) or qd_rad_s (velocity); its target column is data.TARGET_OF[channel]
+    channel: str = "q_rad"  # q_rad (position) or qd_rad_s (velocity); its target column is data.target_of(channel)
     across_runs: str = "median"  # median | median_high: how per-run values combine
     skip_prelude: bool = False  # drop the runner's move to the origin
     controlled_only: bool = False  # only rows in position mode (moteus mode 10)
@@ -45,7 +45,7 @@ def tracking_error(config: TrackingErrorConfig, runs: Sequence[Trajectory]):
     """Per run, ``statistic(actual - target)`` on the kept, finite rows; combined over runs by ``across_runs``."""
 
     per_run, evidence, spans = [], [], []
-    target_name = TARGET_OF.get(config.channel, "")
+    target_name = target_of(config.channel)
     for run in runs:
         if not run.has(target_name):
             continue
@@ -86,7 +86,9 @@ class StopErrorConfig:
 
 
 def stops(run: Trajectory, config: StopErrorConfig) -> list[tuple[float, float, float]]:
-    """(signed stop error (scaled), dwell start, dwell end) of every dwell followed by more motion; times from the run's start."""
+    """(signed stop error (scaled), dwell start, dwell end) of every dwell followed by more motion; times from the run's start. WHY a window's
+    last dwell counts: on a tape the last dwell is parking, not a stop (T4), but a window of a stream (``stream.windows`` labels it) is cut
+    by the clock, so the dwell it ends in is a stop still going; without it a joint holding still reads NoStops for as long as it holds."""
 
     keep = run.rows(skip_prelude=config.skip_prelude)
     t, q = run.t[keep], run.channel("q_rad")[keep]
@@ -94,6 +96,7 @@ def stops(run: Trajectory, config: StopErrorConfig) -> list[tuple[float, float, 
     origin = run.t[0]
     still = np.abs(qd_target) < 1e-9
     errors, start, count = [], 0, len(t)
+    cut_by_the_clock = "window_end_s" in run.labels
     while start < count:
         if not still[start]:
             start += 1
@@ -101,7 +104,7 @@ def stops(run: Trajectory, config: StopErrorConfig) -> list[tuple[float, float, 
         end = start
         while end + 1 < count and still[end + 1] and abs(q_target[end + 1] - q_target[start]) < 1e-9:
             end += 1
-        if t[end] - t[start] >= config.dwell_min_s and end + 1 < count:
+        if t[end] - t[start] >= config.dwell_min_s and (end + 1 < count or cut_by_the_clock):
             window = (t >= t[end] - config.settle_window_s) & (t <= t[end])
             errors.append((float(config.scale * np.mean(q[window] - q_target[window])), float(t[start] - origin), float(t[end] - origin)))
         start = end + 1
@@ -124,7 +127,7 @@ def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
     metric = f"p{config.percentile:g}"
     if not signed:
         return result(config, value=None, unit=config.unit, metric=metric, limits=config.limits, title=title,
-                      message="no dwell found (no stop >= dwell_min_s followed by motion)", code="NoStops")
+                      message="no dwell found (no stop >= dwell_min_s followed by motion, or that a live window ends in)", code="NoStops")
     magnitudes = np.abs(np.array(signed))
     value = float(np.percentile(magnitudes, config.percentile))
     measurements = (Measure("n", len(signed)), Measure("median", float(np.median(magnitudes)), config.unit),

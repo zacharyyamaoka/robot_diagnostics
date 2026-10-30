@@ -24,6 +24,16 @@ COLUMNS = ("q_rad", "q_target_rad", "qd_rad_s", "qd_target_rad_s", "tau_nm", "i_
 TARGET_OF = {"q_rad": "q_target_rad", "qd_rad_s": "qd_target_rad_s"}
 
 
+def target_of(name: str) -> str:
+    """The commanded twin of a measured column: ``TARGET_OF``'s, else PEP 0010's naming with ``_target`` before the unit
+    (``width_mm`` -> ``width_target_mm``, ``force_n`` -> ``force_target_n``). "" for a name without a unit suffix."""
+
+    if name in TARGET_OF:
+        return TARGET_OF[name]
+    stem, _, unit = name.rpartition("_")
+    return f"{stem}_target_{unit}" if stem and unit else ""
+
+
 @dataclass(frozen=True, eq=False)
 class Trajectory:
     t: np.ndarray  # s from the run's start (monotonic)
@@ -45,15 +55,21 @@ class Trajectory:
     frame: str = "joint"  # the frame the columns are written in (a joint's own axis here; "base", "belt" for poses)
     prelude_s: float = 0.0  # the runner's move to the tape's origin; not part of the tape
     labels: Mapping[str, Any] = field(default_factory=dict)  # class, seed, can_id, ff_fraction ...
+    # WHY: a part's own channels beyond the joint's (gyro_rad_s, force_n, width_mm, cpu_temp_c), on the same clock and named by PEP 0010's
+    # rule; a box or a tracking error reads them like any column (io-diagnostics feeds them from an IMU's, load cell's or gripper's State)
+    extra: Mapping[str, np.ndarray] = field(default_factory=dict)
+
+    def _values(self, name: str):
+        return getattr(self, name, None) if name in COLUMNS else self.extra.get(name)
 
     def channel(self, name: str) -> np.ndarray:
-        values = getattr(self, name, None)
+        values = self._values(name)
         if values is None:
             raise KeyError(f"{self.run or 'trajectory'} has no {name!r} column")
         return np.asarray(values, float)
 
     def has(self, name: str) -> bool:
-        return getattr(self, name, None) is not None
+        return self._values(name) is not None
 
     def rows(self, *, skip_prelude: bool = False, controlled_only: bool = False) -> np.ndarray:
         """Boolean mask: the tape (prelude dropped) and/or the position-controlled rows."""

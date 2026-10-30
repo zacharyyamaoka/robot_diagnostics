@@ -16,7 +16,8 @@ from robotdx.diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConf
 from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, rows_of
 from robotdx.diagnostics.stock.health import Stamps
 from robotdx.diagnostics.stock.truthfulness import GRAVITY, KnownLoadInput, KtReadings
-from robotdx.diagnostics.stream import monitor
+from robotdx.diagnostics.stock.tracking import stops
+from robotdx.diagnostics.stream import monitor, windows
 
 from conftest import tape
 
@@ -24,6 +25,14 @@ from conftest import tape
 def test_tracking_error_of_a_constant_offset_is_that_offset():
     out = evaluate("stock.tracking_error", TrackingErrorConfig(limits=Limits.at_most(2.0)), [tape(offset=0.003)], subject="s")
     assert out.value == pytest.approx(3.0) and out.verdict == FAIL and out.code == "AboveErrorLimit"
+
+
+def test_stop_error_counts_the_stop_a_window_ends_in_never_the_stop_a_tape_parks_in():
+    n = 300
+    held = replace(tape(n=n), q_target_rad=np.zeros(n), qd_target_rad_s=np.zeros(n), q_rad=np.full(n, 0.002))  # one dwell, start to end
+    assert stops(held, StopErrorConfig()) == []  # as a tape: parking, not a stop
+    window = next(windows(held, 2.0, 1.0))
+    assert [error for error, _, _ in stops(window, StopErrorConfig())] == [pytest.approx(2.0)]  # cut by the clock: a stop still going
 
 
 def test_stop_error_finds_every_dwell_followed_by_motion():

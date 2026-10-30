@@ -30,7 +30,8 @@ def windows(run: Trajectory, window_s: float, step_s: float) -> Iterator[Traject
         rows = (t >= end - window_s) & (t < end)
         if rows.sum() >= 2:
             sliced = {name: np.asarray(getattr(run, name))[rows] for name in _ARRAYS if getattr(run, name) is not None}
-            yield replace(run, prelude_s=0.0, labels={**run.labels, "window_end_s": float(end - t[0])}, **sliced)
+            extra = {name: np.asarray(values)[rows] for name, values in run.extra.items()}
+            yield replace(run, prelude_s=0.0, labels={**run.labels, "window_end_s": float(end - t[0])}, extra=extra, **sliced)
         end += step_s
 
 
