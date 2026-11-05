@@ -28,8 +28,8 @@ from .core import Limits
 from .rollup import GateMatrixConfig, RollupConfig
 from .stock import (AgreementConfig, AllanConfig, BoxConfig, CoverageConfig, DepthPlaneConfig, EventIntervalConfig, FaultCodesConfig,
                     FeedbackShareConfig, FidelityRatioConfig, FloorConfig, HysteresisConfig, KnownLoadConfig, KtConsistencyConfig,
-                    MarkerDriftConfig, ModelErrorConfig, PathAccuracyConfig, PoseAccuracyConfig, RateConfig, ReprojectionConfig, ShareConfig,
-                    SharpnessConfig, SpectralAngleConfig, SpectralQualityConfig, StalenessConfig, StampDelayConfig, StepResponseConfig,
+                    MarkerDriftConfig, ModelErrorConfig, MoveHoldSplitConfig, PathAccuracyConfig, PoseAccuracyConfig, RateConfig, ReprojectionConfig, RestOffsetConfig, ShareConfig,
+                    SharpnessConfig, SpectralAngleConfig, SplitFidelityConfig, SpectralQualityConfig, StalenessConfig, StampDelayConfig, StepResponseConfig,
                     StopErrorConfig, TrackingErrorConfig)
 
 LIMIT_SOURCES = ("his", "his code", "agent", "proposed", "none")
@@ -69,6 +69,11 @@ DEFAULTS: dict[str, Default] = {
     "servo.floor": D(FloorConfig(channel="q_rad", clock="common", dt=0.002, min_repeats=5), "none"),
     "servo.twin_fidelity": D(FidelityRatioConfig(model="twin", on_floor_class=True, class_limit=2.0, limits=at_most(1.5)), "agent", ACC + " T2"),
     "servo.torque_fidelity": D(FidelityRatioConfig(model="twin", center="median", class_limit=2.0, limits=at_most(2.0)), "agent", ACC + " T3"),
+    "servo.floor_split": D(MoveHoldSplitConfig(dt=0.002), "none"),
+    "servo.twin_split": D(MoveHoldSplitConfig(controlled_by="both", on_class="pickplace"), "none"),
+    "servo.rest_offset": D(RestOffsetConfig(controlled_by="both", min_holds=4), "none"),
+    # WHY 1.5 for each part: the T2 split rule (2026-10-25, the agent's default pick taken while Zach was away, his to overrule)
+    "servo.twin_fidelity_split": D(SplitFidelityConfig(limits=at_most(1.5)), "agent", ACC + " T2 split"),
     "servo.torque_truth_load": D(KnownLoadConfig(limits=Limits(warn_low=-2.0, warn_high=2.0, error_low=-5.0, error_high=5.0)), "agent",
                                  ACC + " T6: +-5 % per unit, +-2 % per type; mass_kg and lever_m are the rig's (unset = not run)"),
     "servo.torque_truth_kt": D(KtConsistencyConfig(limits=Limits(warn_low=0.98, warn_high=1.02, error_low=0.95, error_high=1.05)), "proposed",

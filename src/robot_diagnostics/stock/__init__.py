@@ -1,8 +1,8 @@
 """The stock diagnostics, registered on import. Each is one pure function and one frozen config; a part type gets its
 diagnostics by picking these with its own config (``catalog.py``), not by writing code.
 
-All 30 of the catalog's primitives are implemented (the first 13 since the reference; the 17 it only specified landed 2026-10-28):
-tracking.py, fidelity.py, truthfulness.py (+ agreement), health.py (+ stamp_delay), coverage.py, ../rollup.py, feedback.py,
+All 33 of the catalog's primitives are implemented (the first 13 since the reference; the 17 it only specified landed 2026-10-28; the T2 split's three, 2026-11-04):
+tracking.py, fidelity.py (+ move_hold_split, rest_offset, split_fidelity), truthfulness.py (+ agreement), health.py (+ stamp_delay), coverage.py, ../rollup.py, feedback.py,
 events.py (share, event_interval, staleness), response.py (step_response), iso9283.py (pose / path accuracy), characteristic.py
 (hysteresis_loop, allan_variance), camera.py (reprojection_error, depth_plane, image_sharpness, marker_drift), spectral.py.
 Each cites the standard it computes in its module docstring.
@@ -18,7 +18,8 @@ from .characteristic import AllanConfig, HysteresisConfig, allan_variance, hyste
 from .coverage import CoverageConfig, coverage
 from .events import EventIntervalConfig, ShareConfig, StalenessConfig, event_interval, share, staleness
 from .feedback import FeedbackShareConfig, feedback_share
-from .fidelity import FidelityRatioConfig, FloorConfig, ModelErrorConfig, fidelity_ratio, model_error, repeatability_floor
+from .fidelity import (FidelityRatioConfig, FloorConfig, ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig, SplitFidelityConfig,
+                       fidelity_ratio, model_error, move_hold_split, repeatability_floor, rest_offset, split_fidelity)
 from .iso9283 import PathAccuracyConfig, PoseAccuracyConfig, path_accuracy, pose_accuracy
 from .response import StepResponseConfig, step_response
 from .health import BoxConfig, FaultCodesConfig, RateConfig, StampDelayConfig, box, fault_codes, sample_rate, stamp_delay
@@ -90,6 +91,14 @@ STOCK = [
          summary="a fixed tag's offset from its calibrated pixel centre or pose"),
     Spec("stock.spectral_quality", spectral_quality, SpectralQualityConfig, "spectral quality", "characteristic", "health", "distribution", "series", "1",
          summary="SNR per band on a uniform target; smile and keystone (px) on line and edge targets"),
+    # ---- the T2 split (2026-11-04): what bam_rack_twin metrics() had worked around ----
+    Spec("stock.move_hold_split", move_hold_split, MoveHoldSplitConfig, "move / hold split", "sim_vs_real", "driver", "kpi_trend", "scalar", "mrad",
+         consumers=("sim2real",), summary="an error's moving part and hold part (|commanded speed| <= 0.02 rad/s): over repeats (the floor's "
+         "parts) or per (real, model) run, the worst run of a class heading"),
+    Spec("stock.rest_offset", rest_offset, RestOffsetConfig, "rest offset", "sim_vs_real", "driver", "distribution", "series", "mrad",
+         consumers=("sim2real",), summary="median of where the model rests minus where the real joint rests at every hold, + = model farther"),
+    Spec("stock.split_fidelity", split_fidelity, SplitFidelityConfig, "split fidelity", "sim_vs_real", "headline", "threshold_band", "series", "1",
+         consumers=("sim2real",), summary="T2 split: moves / floor's moving part and |hold offset| / floor's hold part, each <= 1.5"),
     Spec("stock.spectral_angle", spectral_angle, SpectralAngleConfig, "spectral angle", "truthfulness", "driver", "distribution", "series", "rad",
          summary="spectral angle mapper (Kruse 1993) between measured and reference spectra per material"),
 ]

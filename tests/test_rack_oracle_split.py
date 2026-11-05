@@ -32,7 +32,7 @@ EXACT = 1e-9
 
 def _floors() -> list[tuple[str, dict]]:
     stations = json.loads(CALIBRATION.read_text())["stations"]
-    return [*sorted(stations.items()), ("can11 il0.5", json.loads(FOLLOWUP.read_text())["floor"])]
+    return [*sorted((name, entry["floor"]) for name, entry in stations.items()), ("can11 il0.5", json.loads(FOLLOWUP.read_text())["floor"])]
 
 
 @pytest.mark.parametrize(("station", "published"), _floors() if CALIBRATION.is_file() and FOLLOWUP.is_file() else [], ids=lambda value: str(value)[:12])

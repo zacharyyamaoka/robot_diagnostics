@@ -87,6 +87,26 @@ class Trajectory:
         return replace(self, q_rad=np.asarray(q_rad, float), situation=situation, source=source)
 
 
+CONTROLLED_BY = ("real", "both")  # whose position mode decides a scored row of a (real, model) pair
+
+
+def scored_rows(real: Trajectory, model: Trajectory, *, skip_prelude: bool = False, controlled_only: bool = True,
+                controlled_by: str = "real") -> np.ndarray:
+    """The rows of the real run's clock a model is scored on: the tape (``skip_prelude``) and, with ``controlled_only``, the rows in
+    position mode, judged by the real run alone (``real``) or by the real run AND the model (``both``).
+
+    WHY ``both`` (bam_rack_twin budget.q_rms_mrad, 2026-11-04): a twin that timed out or left position mode is not tracking, so its
+    prediction on those rows is not a fidelity statement; the rack scores only the rows both were in mode 10. A model without a mode
+    column (a perfect servo, a lagged target) is taken as tracking everywhere."""
+
+    if controlled_by not in CONTROLLED_BY:
+        raise ValueError(f"controlled_by {controlled_by!r} not in {CONTROLLED_BY}")
+    keep = real.rows(skip_prelude=skip_prelude, controlled_only=controlled_only)
+    if controlled_only and controlled_by == "both" and model.mode is not None:
+        keep &= np.asarray(model.mode) == MODE_POSITION
+    return keep
+
+
 def rms(values: np.ndarray) -> float:
     values = np.asarray(values, float)
     return float(np.sqrt(np.mean(values ** 2))) if values.size else math.nan
