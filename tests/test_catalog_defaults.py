@@ -17,7 +17,7 @@ from robotdx.diagnostics.registry import NO_DATA, config_from_dict
 from robotdx.diagnostics.stock.camera import CalibrationView, DepthFrames, Frames, MarkerTrack
 from robotdx.diagnostics.stock.characteristic import RateSeries
 from robotdx.diagnostics.stock.events import Event, EventLog, EvidenceStamps
-from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow
+from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
 from robotdx.diagnostics.stock.health import StampPairs, Stamps
 from robotdx.diagnostics.stock.iso9283 import PathCycle, PoseSample
 from robotdx.diagnostics.stock.spectral import SpectralSamples, SpectralTargets
@@ -48,6 +48,7 @@ ABSENT = {
     "stock.reprojection_error": [], "stock.depth_plane": DepthFrames(np.full((3, 8, 8), np.nan)), "stock.image_sharpness": Frames(()),
     "stock.marker_drift": MarkerTrack(t=np.zeros(0), tag_id=()), "stock.spectral_quality": SpectralTargets(),
     "stock.spectral_angle": SpectralSamples({}, {}), "stock.rollup": [], "stock.gate_matrix": [],
+    "stock.move_hold_split": [_bare()], "stock.rest_offset": [], "stock.split_fidelity": SplitFidelityInput(None, None, None, None),
 }
 
 
@@ -56,8 +57,10 @@ def _present(primitive: str):
     run = tape()
     if primitive == "stock.repeatability_floor":
         return [tape(run=f"r{i}", offset=0.001 * i) for i in range(5)]
-    if primitive == "stock.model_error":
+    if primitive in ("stock.model_error", "stock.rest_offset"):
         return [(run, tape(offset=0.002, run="twin"))]
+    if primitive == "stock.move_hold_split":
+        return [tape(run=f"r{i}", offset=0.001 * i) for i in range(5)]
     if primitive in ("stock.tracking_error", "stock.stop_error", "stock.box", "stock.fault_codes", "stock.coverage", "stock.feedback_share",
                      "stock.step_response", "stock.hysteresis_loop"):
         return [run]
@@ -84,11 +87,12 @@ def _present(primitive: str):
         "stock.spectral_angle": SpectralSamples({"pet": np.array([[1.0, 0.1]])}, {"pet": np.array([1.0, 0.0])}),
         "stock.rollup": [ONE],
         "stock.gate_matrix": [("CAN 1", "T1", ONE)],
+        "stock.split_fidelity": SplitFidelityInput(floor_moves=2.0, floor_holds=1.0, moves=2.4, rest_offset=0.5),
     }[primitive]
 
 
 def test_every_entry_has_exactly_one_default_and_it_is_its_primitives_config():
-    assert set(DEFAULTS) == set(IDS) and len(IDS) == 89
+    assert set(DEFAULTS) == set(IDS) and len(IDS) == 93
     for entry in catalog.ENTRIES:
         found = catalog.default(entry.id)
         assert isinstance(found.config, REGISTRY[entry.primitive].config_type), entry.id
