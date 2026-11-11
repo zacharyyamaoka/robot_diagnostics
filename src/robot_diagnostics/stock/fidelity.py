@@ -11,6 +11,9 @@
 
 A model is scored on ``data.scored_rows``: the real run's position-mode rows, or (``controlled_by="both"``) the rows both ran in mode 10.
 The first three use ``data.pairwise_rms`` / ``on_common_clock``: one ruler for real-vs-real and model-vs-real.
+
+Since 2026-11-10 (Zach, proposal 2 step 4) every formula here is sim2real.metrics.actuator's (the servo gates T1-T3 and T2's split read the
+same functions); this module keeps the Trajectory, the row masks, the configs and the Result.
 """
 
 from __future__ import annotations
@@ -21,9 +24,10 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .._numpy import np
+from .._sim2real import actuator
 
 from ..core import FAIL, PASS, WARN, Evidence, Limits, Measure, result
-from ..data import CONTROLLED_BY, TARGET_OF, Trajectory, center, difference, on_common_clock, pairwise_rms, rms, scored_rows, target_of
+from ..data import CONTROLLED_BY, TARGET_OF, Trajectory, center, difference, rms, scored_rows, target_of
 
 
 def _signal(run: Trajectory, channel: str, relative_to_target: bool, skip_prelude: bool) -> tuple[np.ndarray, np.ndarray]:
@@ -63,9 +67,9 @@ def repeatability_floor(config: FloorConfig, repeats: Sequence[Trajectory]):
         return result(config, value=None, unit=config.unit, metric="floor", limits=config.limits, title=title,
                       message=f"{len(missing)} of {len(repeats)} repeats have no {config.channel} column", code="NoChannel")
     series = [_signal(run, config.channel, config.relative_to_target, config.skip_prelude) for run in repeats]
-    pairs = pairwise_rms(series, clock=config.clock, dt=config.dt)
-    values = [config.scale * value for _, _, value in pairs]
-    floor = center(values, "median")
+    # WHY sim2real (2026-11-10, proposal 2 step 4): the floor is gate T1's, written once in sim2real.metrics.actuator.floor
+    floor, pairs = actuator.floor(series, clock=config.clock, dt=config.dt, scale=config.scale)
+    values = [value for _, _, value in pairs]
     n = len(repeats)
     cells = [[0.0] * n for _ in range(n)]
     for (i, j, _), value in zip(pairs, values):
@@ -165,10 +169,8 @@ class FidelityRatioConfig:
 def fidelity_ratio(config: FidelityRatioConfig, data: FidelityInput):
     """Model error / floor per (model, class); the headline is the judged model on the floor's class."""
 
-    by: dict[tuple[str, str], list[float]] = {}
-    for row in data.rows:
-        by.setdefault((row.model, row.cls), []).append(row.error / data.floor)
-    ratios = {key: center(values, config.center) for key, values in by.items()}
+    # WHY sim2real (2026-11-10, proposal 2 step 4): model error / floor per (model, class) is gates T2 / T3's, in sim2real.metrics.actuator
+    by, ratios = actuator.fidelity_ratios([(row.model, row.run_id, row.cls, row.error) for row in data.rows], data.floor, config.center)
     classes = sorted({cls for _, cls in ratios})
     models = sorted({model for model, _ in ratios})
     title = f"fidelity ratio ({config.model} / floor)"
@@ -210,10 +212,6 @@ def fidelity_ratio(config: FidelityRatioConfig, data: FidelityInput):
 # bam_rack_twin's (round7_study.floor_split / rms_split, budget.hold_rest_differences, stations_d_pass.t2_of), reproduced to 1e-9.
 HOLD_SPEED_RAD_S = 0.02  # |commanded speed| at or under this is a hold (bam_rack_twin budget.HOLD_SPEED_RAD_S)
 PARTS = ("all", "moves", "holds")
-
-
-def _rms_or_none(values: np.ndarray, scale: float) -> float | None:
-    return scale * rms(values) if values.size else None
 
 
 def _speed(run: Trajectory, channel: str) -> np.ndarray:
@@ -258,12 +256,8 @@ def _pair_parts(config: MoveHoldSplitConfig, a: Trajectory, b: Trajectory) -> di
         speed = _speed(run, config.speed_channel)[keep]
         t = run.t[keep]
         series.append((t - t[0], values[keep], np.where(np.isfinite(speed), speed, 0.0)))
-    (t_a, e_a, v_a), (t_b, e_b, _) = series
-    grid = np.arange(0.0, min(t_a[-1], t_b[-1]), config.dt)
-    gap = np.interp(grid, t_a, e_a) - np.interp(grid, t_b, e_b)
-    hold = np.abs(np.interp(grid, t_a, v_a)) <= config.hold_speed
-    return {"all": _rms_or_none(gap, config.scale), "moves": _rms_or_none(gap[~hold], config.scale),
-            "holds": _rms_or_none(gap[hold], config.scale), "hold_fraction": float(hold.mean()) if hold.size else None}
+    # WHY sim2real (2026-11-10, proposal 2 step 4): the pair's parts are T2's split, in sim2real.metrics.actuator.pair_parts
+    return actuator.pair_parts(series[0], series[1], dt=config.dt, hold_speed=config.hold_speed, scale=config.scale)
 
 
 def _run_parts(config: MoveHoldSplitConfig, real: Trajectory, model: Trajectory) -> dict[str, float | None]:
@@ -271,10 +265,7 @@ def _run_parts(config: MoveHoldSplitConfig, real: Trajectory, model: Trajectory)
 
     rows = scored_rows(real, model, skip_prelude=config.skip_prelude, controlled_only=config.controlled_only, controlled_by=config.controlled_by)
     hold = rows & (np.abs(_speed(real, config.speed_channel)) <= config.hold_speed)
-    gap = real.channel(config.channel) - model.channel(config.channel)
-    finite = np.isfinite(gap)
-    return {"all": _rms_or_none(gap[rows & finite], config.scale), "moves": _rms_or_none(gap[rows & ~hold & finite], config.scale),
-            "holds": _rms_or_none(gap[hold & finite], config.scale), "hold_fraction": float(hold.sum() / rows.sum()) if rows.any() else None}
+    return actuator.run_parts(real.channel(config.channel), model.channel(config.channel), rows, hold, scale=config.scale)
 
 
 def _middle(values) -> float | None:
@@ -364,19 +355,9 @@ def rest_holds(config: RestOffsetConfig, real: Trajectory, model: Trajectory) ->
     target = real.channel(target_of(config.channel))
     rows = (scored_rows(real, model, skip_prelude=config.skip_prelude, controlled_only=config.controlled_only, controlled_by=config.controlled_by)
             & np.isfinite(target) & (np.abs(_speed(real, config.speed_channel)) <= config.hold_speed))
-    edges = np.flatnonzero(np.diff(np.concatenate([[0], rows.astype(int), [0]])))
-    t, q_real, q_model = real.t - real.t[0], real.channel(config.channel), model.channel(config.channel)
-    holds = []
-    for start, end in zip(edges[::2], edges[1::2], strict=True):
-        if t[end - 1] - t[start] < config.min_hold_s:
-            continue
-        tail = np.arange(start, end)[t[start:end] >= t[end - 1] - config.tail_s]
-        rest_real = float(np.mean(target[tail] - q_real[tail]))
-        rest_model = float(np.mean(target[tail] - q_model[tail]))
-        side = 1.0 if rest_real >= 0.0 else -1.0
-        holds.append({"t_start_s": float(t[start]), "t_end_s": float(t[end - 1]), "real": config.scale * side * rest_real,
-                      "model": config.scale * side * rest_model, "model_minus_real": config.scale * side * (rest_model - rest_real)})
-    return holds
+    # WHY sim2real (2026-11-10, proposal 2 step 4): where each hold rests is T2's split, in sim2real.metrics.actuator.rest_holds
+    return actuator.rest_holds(real.t - real.t[0], target, real.channel(config.channel), model.channel(config.channel), rows,
+                               min_hold_s=config.min_hold_s, tail_s=config.tail_s, scale=config.scale)
 
 
 def rest_offset(config: RestOffsetConfig, pairs):
@@ -393,15 +374,16 @@ def rest_offset(config: RestOffsetConfig, pairs):
         return result(config, value=None, message=f"{len(found)} hold(s) at rest over {len(pairs)} runs: the offset needs {config.min_holds}",
                       code="TooFewHolds", measurements=(Measure("holds", len(found)),), **common)
     d = np.array([hold["model_minus_real"] for _, _, hold in found])
-    value = float(np.median(d))
+    summary = actuator.rest_summary(d)
+    value = summary["median"]
     worst = max(found, key=lambda item: abs(item[2]["model_minus_real"]))
-    measurements = (Measure("holds", int(d.size)), Measure("median_abs", float(np.median(np.abs(d))), config.unit),
-                    Measure("p10", float(np.percentile(d, 10)), config.unit), Measure("p90", float(np.percentile(d, 90)), config.unit),
-                    Measure("farther_fraction", float(np.mean(d > 0.0))), Measure("runs", len(pairs)))
+    measurements = (Measure("holds", int(d.size)), Measure("median_abs", summary["median_abs"], config.unit),
+                    Measure("p10", summary["p10"], config.unit), Measure("p90", summary["p90"], config.unit),
+                    Measure("farther_fraction", summary["farther_fraction"]), Measure("runs", len(pairs)))
     payload = {"x": [hold["t_start_s"] for _, _, hold in found], "y": d.tolist(), "group": [real.run for real, _, _ in found],
                "x_label": "hold start (s)", "y_label": f"model - real rest ({config.unit}, + = model farther)"}
     return result(config, value=value, measurements=measurements, payload=payload, run=worst[0].run, t0=worst[2]["t_start_s"], t1=worst[2]["t_end_s"],
-                  message=f"median model - real rest {value:+.4g} {config.unit} over {d.size} holds ({float(np.mean(d > 0.0)):.0%} farther)",
+                  message=f"median model - real rest {value:+.4g} {config.unit} over {d.size} holds ({summary['farther_fraction']:.0%} farther)",
                   evidence=tuple(Evidence(real.run, f"{config.channel} rest, real vs {model.situation}") for real, model in pairs),
                   why="a model resting farther out captures the stop early (friction too high); nearer, too late", **common)
 
@@ -443,7 +425,7 @@ def split_fidelity(config: SplitFidelityConfig, data: SplitFidelityInput):
         value = getattr(data, name)
         if value is None or not math.isfinite(value) or (name.startswith("floor") and value <= 0.0):
             return result(config, value=None, message=f"no {name.replace('_', ' ')}", code=code, **common)
-    moves, hold = data.moves / data.floor_moves, abs(data.rest_offset) / data.floor_holds
+    moves, hold = actuator.split_ratios(data.moves, data.floor_moves, data.rest_offset, data.floor_holds)
     value = max(moves, hold)
     binding = "moves" if moves >= hold else "hold offset"
     measurements = (Measure("moves_over_floor", moves), Measure("hold_offset_over_floor", hold), Measure("floor_moves", data.floor_moves, data.unit),
