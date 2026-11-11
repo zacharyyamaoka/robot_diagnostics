@@ -11,9 +11,10 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .._numpy import np
+from .._sim2real import actuator
 
 from ..core import NOT_RUN, WARN, Evidence, Limits, Measure, result
-from ..data import Trajectory, center, rms, target_of
+from ..data import Trajectory, center, target_of
 
 
 @dataclass(frozen=True)
@@ -30,15 +31,8 @@ class TrackingErrorConfig:
 
 
 def _statistic(error: np.ndarray, t: np.ndarray, config: TrackingErrorConfig) -> float:
-    if config.statistic == "rms":
-        return rms(error)
-    if config.statistic == "p95":
-        return float(np.percentile(np.abs(error), 95))
-    if config.statistic == "max":
-        return float(np.max(np.abs(error)))
-    if config.statistic == "final":
-        return float(np.mean(np.abs(error[t >= t[-1] - config.final_window_s])))
-    raise ValueError(f"unknown statistic {config.statistic!r}")
+    # WHY sim2real (2026-11-10, proposal 2 step 4): the statistic is sim2real.metrics.actuator's (rms, p95 and max robot_msgs.compare's)
+    return actuator.tracking_statistic(error, t, config.statistic, final_window_s=config.final_window_s)
 
 
 def tracking_error(config: TrackingErrorConfig, runs: Sequence[Trajectory]):
@@ -91,24 +85,11 @@ def stops(run: Trajectory, config: StopErrorConfig) -> list[tuple[float, float, 
     by the clock, so the dwell it ends in is a stop still going; without it a joint holding still reads NoStops for as long as it holds."""
 
     keep = run.rows(skip_prelude=config.skip_prelude)
-    t, q = run.t[keep], run.channel("q_rad")[keep]
-    q_target, qd_target = run.channel("q_target_rad")[keep], run.channel("qd_target_rad_s")[keep]
-    origin = run.t[0]
-    still = np.abs(qd_target) < 1e-9
-    errors, start, count = [], 0, len(t)
-    cut_by_the_clock = "window_end_s" in run.labels
-    while start < count:
-        if not still[start]:
-            start += 1
-            continue
-        end = start
-        while end + 1 < count and still[end + 1] and abs(q_target[end + 1] - q_target[start]) < 1e-9:
-            end += 1
-        if t[end] - t[start] >= config.dwell_min_s and (end + 1 < count or cut_by_the_clock):
-            window = (t >= t[end] - config.settle_window_s) & (t <= t[end])
-            errors.append((float(config.scale * np.mean(q[window] - q_target[window])), float(t[start] - origin), float(t[end] - origin)))
-        start = end + 1
-    return errors
+    # WHY sim2real (2026-11-10, proposal 2 step 4): the dwell rule is T4's, written once in sim2real.metrics.actuator.stops; the rows are this
+    # run's tape (the prelude dropped), the times from the run's own start
+    return actuator.stops(run.t[keep], run.channel("q_rad")[keep], run.channel("q_target_rad")[keep], run.channel("qd_target_rad_s")[keep],
+                          dwell_min_s=config.dwell_min_s, settle_window_s=config.settle_window_s, scale=config.scale, origin=run.t[0],
+                          open_end="window_end_s" in run.labels)
 
 
 def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
@@ -128,12 +109,11 @@ def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
     if not signed:
         return result(config, value=None, unit=config.unit, metric=metric, limits=config.limits, title=title,
                       message="no dwell found (no stop >= dwell_min_s followed by motion, or that a live window ends in)", code="NoStops")
-    magnitudes = np.abs(np.array(signed))
-    value = float(np.percentile(magnitudes, config.percentile))
-    measurements = (Measure("n", len(signed)), Measure("median", float(np.median(magnitudes)), config.unit),
-                    Measure("max", float(magnitudes.max()), config.unit),
-                    Measure("mean_signed", float(np.mean(signed)), config.unit), Measure("runs", len(evidence)))
-    worst = int(np.argmax(magnitudes))
+    summary = actuator.stop_summary(signed, config.percentile)
+    value = summary["value"]
+    measurements = (Measure("n", summary["n"]), Measure("median", summary["median"], config.unit), Measure("max", summary["max"], config.unit),
+                    Measure("mean_signed", summary["mean_signed"], config.unit), Measure("runs", len(evidence)))
+    worst = summary["worst"]
     common = dict(measurements=measurements, evidence=tuple(evidence), run=labels[worst], t0=windows[worst][0], t1=windows[worst][1],
                   why="the stop band is about (Coulomb friction + unbalanced gravity) / kp: try Coulomb feed-forward (ff_study) before gains; "
                       "an encoder-side pass still needs the output side (camera)",

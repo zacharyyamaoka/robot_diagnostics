@@ -10,12 +10,10 @@ Data-ui never needs to know what these mean (Zach, 2026-10-28: "Data UI doesn't 
 
 from __future__ import annotations
 
-import itertools
-import math
-import statistics
 from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
+from . import _sim2real
 from ._numpy import np
 
 MODE_POSITION = 10  # moteus mode 10 = position control: the rows a controller was actually tracking
@@ -107,51 +105,45 @@ def scored_rows(real: Trajectory, model: Trajectory, *, skip_prelude: bool = Fal
     return keep
 
 
+# WHY the rulers are sim2real's (2026-11-10, proposal 2 step 4): the floor (real vs real) and fidelity (model vs real) share one RMS, one
+# clock and one centre, and bam_rack_twin's gates T1-T4 read the same; they live once in sim2real.metrics.series, unchanged to the bit.
+
+
 def rms(values: np.ndarray) -> float:
-    values = np.asarray(values, float)
-    return float(np.sqrt(np.mean(values ** 2))) if values.size else math.nan
+    """RMS of a series, NaN when empty (sim2real.metrics.series.rms: robot_msgs.compare's for a finite series)."""
+
+    return _sim2real.series.rms(values)
 
 
 def difference(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """data-ui PEP 0010 §4.4 ``difference(a, b)``: on a's own samples inside b's span, b(t_i) - a(t_i), b linearly
-    interpolated; no row outside b's span (never extrapolates). Returns (t_i, b - a)."""
+    interpolated; no row outside b's span (never extrapolates). Returns (t_i, b - a). sim2real.metrics.series.difference."""
 
-    (t_a, y_a), (t_b, y_b) = a, b
-    inside = (t_a >= t_b[0]) & (t_a <= t_b[-1])
-    return t_a[inside], np.interp(t_a[inside], t_b, y_b) - y_a[inside]
+    return _sim2real.series.difference(a, b)
 
 
 def on_common_clock(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray], dt: float) -> tuple[np.ndarray, np.ndarray]:
-    """Two (t from 0, signal) series linearly interpolated onto one grid over their overlap: ``arange(0, min end, dt)``.
-    WHY it exists beside ``difference``: bam_rack_twin's floor (gate T1) is defined on this shared clock; the oracle
-    match needs it, and the floor's config can pick either (``clock``)."""
+    """Two (t from 0, signal) series linearly interpolated onto one grid over their overlap: ``arange(0, min end, dt)``; the floor's
+    (gate T1) shared clock. sim2real.metrics.series.on_common_clock."""
 
-    (t_a, y_a), (t_b, y_b) = a, b
-    grid = np.arange(0.0, min(t_a[-1], t_b[-1]), dt)
-    return np.interp(grid, t_a, y_a), np.interp(grid, t_b, y_b)
+    return _sim2real.series.on_common_clock(a, b, dt)
 
 
 def pair_rms(a: tuple[np.ndarray, np.ndarray], b: tuple[np.ndarray, np.ndarray], *, clock: str = "common", dt: float = 0.002) -> float:
     """RMS(b - a) on one clock: ``common`` (a shared grid of step dt) or ``a`` (a's own samples, PEP 0010)."""
 
-    if clock == "a":
-        return rms(difference(a, b)[1])
-    y_a, y_b = on_common_clock(a, b, dt)
-    return rms(y_b - y_a)
+    return _sim2real.series.pair_rms(a, b, clock=clock, dt=dt)
 
 
 def pairwise_rms(series: Sequence[tuple[np.ndarray, np.ndarray]], *, clock: str = "common", dt: float = 0.002) -> list[tuple[int, int, float]]:
-    """RMS of the difference for every pair. The shared primitive of the floor (real vs real) and of fidelity (model vs
-    real): WHY one function, so a fidelity ratio is never a ratio of two different rulers."""
+    """RMS of the difference for every pair: the shared primitive of the floor and of fidelity, so a fidelity ratio is never a ratio of
+    two different rulers."""
 
-    return [(i, j, pair_rms(a, b, clock=clock, dt=dt)) for (i, a), (j, b) in itertools.combinations(enumerate(series), 2)]
+    return _sim2real.series.pairwise_rms(series, clock=clock, dt=dt)
 
 
 def center(values: Sequence[float], how: str = "median") -> float:
-    """``median`` or ``median_high`` (the stdlib names). WHY a choice: bam_rack_twin's per-class twin ratio takes
-    ``sorted(v)[n // 2]``, which is ``statistics.median_high``; the floor takes ``statistics.median``."""
+    """``median`` or ``median_high`` (the stdlib names) of the finite values; bam_rack_twin's per-class twin ratio takes ``sorted(v)[n // 2]``
+    (median_high), the floor ``statistics.median``. sim2real.metrics.series.center."""
 
-    values = [v for v in values if v is not None and math.isfinite(v)]
-    if not values:
-        return math.nan
-    return float(statistics.median_high(values) if how == "median_high" else statistics.median(values))
+    return _sim2real.series.center(values, how)

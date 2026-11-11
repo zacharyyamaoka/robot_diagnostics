@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .._numpy import np
+from .._sim2real import coverage as s2r_coverage
 
 from ..core import Evidence, Limits, Measure, result
 from ..data import Trajectory
@@ -48,9 +49,12 @@ def coverage(config: CoverageConfig, runs: Sequence[Trajectory]):
     x, y = np.concatenate(xs), np.concatenate(ys)
     finite = np.isfinite(x) & np.isfinite(y)
     x, y = x[finite], y[finite]
-    counts, x_edges, y_edges = np.histogram2d(x, y, bins=list(config.bins), range=[list(config.x_range), list(config.y_range)])
+    # WHY sim2real / robot_msgs (2026-11-10, proposal 2 step 4: "coverage comes from robot_msgs.coverage"): the cell a row falls in is
+    # robot_msgs.coverage's binning (numpy.histogramdd's convention, which numpy.histogram2d computed here before), through sim2real.metrics
+    x_edges, y_edges = np.linspace(*config.x_range, config.bins[0] + 1), np.linspace(*config.y_range, config.bins[1] + 1)
+    counts = s2r_coverage.cell_counts(x, y, x_edges, y_edges)
     inside = int(counts.sum())
-    covered = float(np.mean(counts >= config.min_samples))
+    covered = s2r_coverage.covered_share(counts, config.min_samples)
     return result(config, value=covered, unit="1", metric="covered", limits=config.limits, title=title,
                   message=f"{covered:.0%} of {counts.size} cells have >= {config.min_samples} rows; {inside} of {x.size} rows inside the envelope",
                   measurements=(Measure("rows_outside", int(x.size - inside)), Measure(f"{config.x}_min", float(x.min())),
