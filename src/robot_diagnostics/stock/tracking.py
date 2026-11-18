@@ -3,6 +3,9 @@
 Zach, DP - Reality as Oracle (2026-10-02): "avg error, max error, (in the various angles), error at stop, etc." and the
 goal "improve net trackectory tracking performance". Gate T4 (static accuracy) is ``stop_error`` with the joint's share
 of the 5 mm tool gate as its limit.
+
+The math is robot_metrics' (docs/peps/0004-stock-diagnostics-on-robot-metrics.md): ``metric(config)`` and ``stop_metric(config)`` name the
+metric each config computes through, whose identity is the statistic and the stop rule, never the limits, the unit or the side.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .._numpy import np
-from .._sim2real import actuator
+from .._robot_metrics import metrics, streams
 
 from ..core import NOT_RUN, WARN, Evidence, Limits, Measure, result
 from ..data import Trajectory, center, target_of
@@ -30,9 +33,36 @@ class TrackingErrorConfig:
     limits: Limits = field(default_factory=Limits)
 
 
-def _statistic(error: np.ndarray, t: np.ndarray, config: TrackingErrorConfig) -> float:
-    # WHY sim2real (2026-11-10, proposal 2 step 4): the statistic is sim2real.metrics.actuator's (rms, p95 and max robot_msgs.compare's)
-    return actuator.tracking_statistic(error, t, config.statistic, final_window_s=config.final_window_s)
+STATISTICS = ("rms", "p95", "max", "final")
+
+
+def metric(config: TrackingErrorConfig):
+    """The robot_metrics metric a config computes through: rms -> ErrorStat rms, p95 -> ErrorPercentile 95, max -> ErrorStat max_abs,
+    final -> ErrorStat mean_abs (read on the run's last ``final_window_s``). Its identity is the statistic alone: the channel, rows, scale,
+    unit, across-runs rule and limits are how RobotDx feeds and reads it, not the metric."""
+
+    if config.statistic == "final":
+        return metrics.ErrorStat(statistic="mean_abs")
+    if config.statistic not in STATISTICS:
+        raise ValueError(f"unknown statistic {config.statistic!r}")
+    if config.statistic == "p95":
+        return metrics.ErrorPercentile(percentile=95.0)
+    return metrics.ErrorStat(statistic="rms" if config.statistic == "rms" else "max_abs")
+
+
+def _statistic(t: np.ndarray, actual: np.ndarray, target: np.ndarray, config: TrackingErrorConfig) -> float:
+    """One run's statistic of (actual - target) on its kept, finite rows, unscaled.
+
+    WHY robot_metrics (2026-11-17, PEP 0004; sim2real.metrics.actuator.tracking_statistic before it, 2026-11-10): rms, p95 and max are
+    robot_msgs.compare's numbers through robot_metrics' ErrorStat / ErrorPercentile, bit for bit; ``final`` is the mean |e| over the run's
+    last ``final_window_s`` (the stop band a tracking run ends in), ErrorStat's mean_abs on those rows."""
+
+    measure = metric(config)
+    if config.statistic == "final":
+        tail = t >= t[-1] - config.final_window_s
+        t, actual, target = t[tail], actual[tail], target[tail]
+    reference, response = streams(t, actual, target, name=config.channel)
+    return measure(reference, response)
 
 
 def tracking_error(config: TrackingErrorConfig, runs: Sequence[Trajectory]):
@@ -43,11 +73,11 @@ def tracking_error(config: TrackingErrorConfig, runs: Sequence[Trajectory]):
     for run in runs:
         if not run.has(target_name):
             continue
-        error = run.channel(config.channel) - run.channel(target_name)
-        keep = run.rows(skip_prelude=config.skip_prelude, controlled_only=config.controlled_only) & np.isfinite(error)
+        actual, target = run.channel(config.channel), run.channel(target_name)
+        keep = run.rows(skip_prelude=config.skip_prelude, controlled_only=config.controlled_only) & np.isfinite(actual - target)
         if keep.sum() < 2:
             continue
-        per_run.append(config.scale * _statistic(error[keep], run.t[keep], config))
+        per_run.append(config.scale * _statistic(run.t[keep], actual[keep], target[keep], config))
         evidence.append(Evidence(run.run, f"{config.channel} - {target_name}"))
         spans.append((float(run.t[keep][0] - run.t[0]), float(run.t[keep][-1] - run.t[0])))
     value = center(per_run, config.across_runs) if per_run else None
@@ -79,17 +109,32 @@ class StopErrorConfig:
     limits: Limits = field(default_factory=Limits)
 
 
+def stop_metric(config: StopErrorConfig, *, open_end: bool = False):
+    """The robot_metrics metric a config computes through: StopStat on |error| at T4's rule - a dwell >= ``dwell_min_s`` at zero commanded
+    speed on one target, its error the mean over its last ``settle_window_s``, a dwell the tape starts in counting, its last dwell (parking)
+    not, unless ``open_end`` (a live window) - and the config's percentile. Never the limits, side, scale or unit."""
+
+    # WHY the shortest positional spelling: "p90", "p97.5" - the percentile itself, never rounded (":g" would make 99.99999 "p100")
+    statistic = "p" + np.format_float_positional(float(config.percentile), trim="-")
+    return metrics.StopStat(of="error", statistic=statistic, include_last_dwell=open_end, dwell_min_s=config.dwell_min_s,
+                            settle_window_s=config.settle_window_s, count_first_dwell=True)
+
+
 def stops(run: Trajectory, config: StopErrorConfig) -> list[tuple[float, float, float]]:
     """(signed stop error (scaled), dwell start, dwell end) of every dwell followed by more motion; times from the run's start. WHY a window's
     last dwell counts: on a tape the last dwell is parking, not a stop (T4), but a window of a stream (``stream.windows`` labels it) is cut
     by the clock, so the dwell it ends in is a stop still going; without it a joint holding still reads NoStops for as long as it holds."""
 
     keep = run.rows(skip_prelude=config.skip_prelude)
-    # WHY sim2real (2026-11-10, proposal 2 step 4): the dwell rule is T4's, written once in sim2real.metrics.actuator.stops; the rows are this
-    # run's tape (the prelude dropped), the times from the run's own start
-    return actuator.stops(run.t[keep], run.channel("q_rad")[keep], run.channel("q_target_rad")[keep], run.channel("qd_target_rad_s")[keep],
-                          dwell_min_s=config.dwell_min_s, settle_window_s=config.settle_window_s, scale=config.scale, origin=run.t[0],
-                          open_end="window_end_s" in run.labels)
+    # WHY robot_metrics (2026-11-17, PEP 0004; sim2real.metrics.actuator.stops before it): the dwell rule is T4's, now one option set of
+    # robot_metrics' stop kernel (count_first_dwell, include_last_dwell=open_end), bit for bit; the rows are this run's tape (the prelude
+    # dropped), each error scaled per stop and the times from the run's own start, as before
+    measure = stop_metric(config, open_end="window_end_s" in run.labels)
+    target, measured = streams(run.t[keep], run.channel("q_rad")[keep], run.channel("q_target_rad")[keep], run.channel("qd_target_rad_s")[keep],
+                               name="q_rad")
+    origin = run.t[0]
+    return [(config.scale * stop.error, float(stop.move_t[stop.move_end] - origin), float(stop.move_t[-1] - origin))
+            for stop in measure.stops(measure.update(measure.empty(), target, measured))]
 
 
 def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
@@ -109,7 +154,9 @@ def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
     if not signed:
         return result(config, value=None, unit=config.unit, metric=metric, limits=config.limits, title=title,
                       message="no dwell found (no stop >= dwell_min_s followed by motion, or that a live window ends in)", code="NoStops")
-    summary = actuator.stop_summary(signed, config.percentile)
+    # WHY robot_metrics' stop_summary and not StopStat.compute: the percentile is taken over the stops in this config's unit (mrad), as
+    # RobotDx always has; StopStat takes it in SI and a percentile interpolates, so the two differ at the last bit (PEP 0004)
+    summary = metrics.functional.stop_summary(signed, config.percentile)
     value = summary["value"]
     measurements = (Measure("n", summary["n"]), Measure("median", summary["median"], config.unit), Measure("max", summary["max"], config.unit),
                     Measure("mean_signed", summary["mean_signed"], config.unit), Measure("runs", len(evidence)))
@@ -127,4 +174,4 @@ def stop_error(config: StopErrorConfig, runs: Sequence[Trajectory]):
     return within
 
 
-__all__ = ["TrackingErrorConfig", "tracking_error", "StopErrorConfig", "stop_error", "stops", "NOT_RUN"]
+__all__ = ["TrackingErrorConfig", "tracking_error", "metric", "StopErrorConfig", "stop_error", "stop_metric", "stops", "NOT_RUN"]

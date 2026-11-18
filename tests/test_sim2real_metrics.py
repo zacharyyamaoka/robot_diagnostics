@@ -1,5 +1,9 @@
 """The stock checks that are also the servo gates compute through sim2real.metrics: one formula, not two.
 
+Since 2026-11-17 (docs/peps/0004) tracking error and the stop error compute through robot_metrics instead, held by
+test_robot_metrics_seam.py in this file's spy-and-sentinel pattern; what stays on sim2real (the floor, fidelity, T2's split, coverage
+and the shared rulers) is held here.
+
     uv run --project /home/bam/io-diagnostics --group dev pytest -q /home/bam/io-diagnostics/tests/diagnostics/test_sim2real_metrics.py
 
 Zach, 2026-11-10 ("Sim2Real as a Pure Library on robot_msgs", step 4): RobotDx's stock checks duplicated bam_rack_twin's gates T1-T4 (the
@@ -20,7 +24,7 @@ import sim2real.metrics.series as series
 from robotdx.diagnostics import data, evaluate
 from robotdx.diagnostics.data import Trajectory
 from robotdx.diagnostics.stock import (CoverageConfig, FidelityRatioConfig, FloorConfig, ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig,
-                                       SplitFidelityConfig, StopErrorConfig, TrackingErrorConfig)
+                                       SplitFidelityConfig)
 from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
 
 
@@ -58,18 +62,6 @@ def test_the_floor_is_sim2reals(monkeypatch):
     assert calls == ["floor"] and result.value is not None
     monkeypatch.setattr(actuator, "floor", lambda series_, **kwargs: (123.0, [(i, j, 1.0) for i in range(5) for j in range(i + 1, 5)]))
     assert evaluate("stock.repeatability_floor", FloorConfig(), REPEATS, subject="x").value == 123.0
-
-
-def test_tracking_and_stops_are_sim2reals(monkeypatch):
-    calls = _spy(monkeypatch, actuator, "tracking_statistic")
-    assert evaluate("stock.tracking_error", TrackingErrorConfig(), REPEATS[:2], subject="x").value is not None
-    assert calls == ["tracking_statistic"] * 2
-    stops, summary = _spy(monkeypatch, actuator, "stops"), _spy(monkeypatch, actuator, "stop_summary")
-    result = evaluate("stock.stop_error", StopErrorConfig(side="output"), REPEATS[:2], subject="x")
-    assert stops == ["stops"] * 2 and summary == ["stop_summary"] and result.value is not None
-    monkeypatch.setattr(actuator, "stop_summary", lambda signed, percentile: {"value": 7.0, "n": len(signed), "median": 1.0, "max": 9.0,
-                                                                               "mean_signed": 0.0, "worst": 0})
-    assert evaluate("stock.stop_error", StopErrorConfig(side="output"), REPEATS[:2], subject="x").value == 7.0
 
 
 def test_model_error_and_the_fidelity_ratio_are_sim2reals(monkeypatch):

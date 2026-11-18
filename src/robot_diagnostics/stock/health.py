@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Sequence
 
 from .._numpy import np
+from .._robot_metrics import metrics, streams
 
 from ..core import FAIL, NOT_RUN, PASS, WARN, Evidence, Limits, Measure, judge, result, worst
 from ..data import Trajectory
@@ -211,28 +212,44 @@ class FaultCodesConfig:
     timeout_is_fault: bool = True  # mode 11: the watchdog latched
 
 
+def limiter_metric(code: int):
+    """The robot_metrics metric behind one limiter's share: CodeShare of that code on the fault channel (its identity is the code, never
+    ``limiter_share_warn``)."""
+
+    return metrics.CodeShare(codes=(int(code),), channel="fault")
+
+
 def fault_codes(config: FaultCodesConfig, runs: Sequence[Trajectory]):
     """Hard faults and watchdog timeouts fail; a limiter engaged on more than ``limiter_share_warn`` of rows warns."""
 
     rows = faults = timeouts = 0
-    shares: dict[int, int] = {}
+    engaged: set[int] = set()
+    coded = []
     for run in runs:
         if run.fault is None:
             continue
         codes = np.asarray(run.fault).astype(int)
         mode = np.asarray(run.mode).astype(int) if run.mode is not None else np.zeros_like(codes)
         rows += codes.size
+        coded.append(run)
         hard = (codes >= config.fault_codes[0]) & (codes <= config.fault_codes[1])
         faults += int(np.sum(np.diff(np.concatenate([[0], (hard | (mode == MODE_FAULT)).astype(int)])) == 1))
         timeouts += int(np.sum(np.diff(np.concatenate([[0], (mode == MODE_TIMEOUT).astype(int)])) == 1))
-        for code in np.unique(codes):
-            if config.limiter_codes[0] <= code <= config.limiter_codes[1]:
-                shares[int(code)] = shares.get(int(code), 0) + int(np.sum(codes == code))
+        engaged.update(int(code) for code in np.unique(codes) if config.limiter_codes[0] <= code <= config.limiter_codes[1])
     title = "fault and limiter codes"
     limits = Limits.at_most(0)
     if not rows:
         return result(config, value=None, unit="1", metric="faults", limits=limits, title=title, message="no fault channel", code="NoChannel")
-    share = {code: count / rows for code, count in sorted(shares.items())}
+    # WHY robot_metrics (2026-11-17, PEP 0004): a limiter's share of rows is CodeShare(codes=(c,)) folded over every run with a fault channel
+    # (hits / rows, the same integers as before); the hard faults and timeouts are rising edges, counted here (an event count, not a share)
+    measured = [streams(run.t, None, channels={"fault": run.fault})[1] for run in coded] if engaged else []
+    share = {}
+    for code in sorted(engaged):
+        measure = limiter_metric(code)
+        state = measure.empty()
+        for stream in measured:
+            state = measure.update(state, stream, stream)  # WHY the stream twice: a code share reads the measured rows alone
+        share[code] = measure.compute(state)
     events = faults + (timeouts if config.timeout_is_fault else 0)
     verdict, code = (FAIL, "HardFault" if faults else "WatchdogTimeout") if events else (PASS, "")
     busiest = max(share.items(), key=lambda item: item[1], default=(None, 0.0))
@@ -248,4 +265,5 @@ def fault_codes(config: FaultCodesConfig, runs: Sequence[Trajectory]):
                   evidence=tuple(Evidence(run.run, "fault") for run in runs if run.fault is not None))
 
 
-__all__ = ["BoxConfig", "box", "RateConfig", "Stamps", "sample_rate", "StampPairs", "StampDelayConfig", "stamp_delay", "FaultCodesConfig", "fault_codes", "MOTEUS_CODES", "FAIL"]
+__all__ = ["BoxConfig", "box", "RateConfig", "Stamps", "sample_rate", "StampPairs", "StampDelayConfig", "stamp_delay", "FaultCodesConfig", "fault_codes",
+           "limiter_metric", "MOTEUS_CODES", "FAIL"]

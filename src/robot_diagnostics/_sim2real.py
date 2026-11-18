@@ -5,6 +5,10 @@ WHY sim2real (Zach, 2026-11-10, "Sim2Real as a Pure Library on robot_msgs", step
 binning were written twice, here and in bam_rack_twin's acceptance gates. Their formulas now live once in sim2real.metrics; these checks
 keep their Trajectory, their row masks, their configs and their Result, and call it.
 
+Since 2026-11-17 (docs/peps/0004, "a diagnostic = a metric + a threshold") tracking error and the stop error take their metric from
+robot_metrics instead (``_robot_metrics.py``). This module stays for what robot_metrics v0 does not compute yet: the shared rulers in
+``data.py`` (the floor's and fidelity's RMS, clock and centre), the floor, model error, the fidelity ratio, T2's split and coverage.
+
 WHY lazy (as ``_numpy``): sim2real is in the ``diagnostics`` extra beside numpy, never a dependency of the host. Without it every module still
 imports and every stock Spec still registers; running a check that needs it raises ``ModuleNotFoundError`` (name ``sim2real``, or ``numpy``),
 which the host reports as not_run.
