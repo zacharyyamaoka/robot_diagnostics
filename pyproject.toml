@@ -1,0 +1,56 @@
+[build-system]
+# WHY >=1.27: the first hatchling that writes PEP 639 metadata (robot_models' template).
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "robot-diagnostics"
+version = "0.1.0"
+description = "Robot diagnostics as pure functions: a dataclass config plus a window of data gives a judged Result (pass / warn / fail / not run)."
+readme = "README.md"
+authors = [{ name = "Zach Yamaoka" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+keywords = ["robotics", "diagnostics", "health monitoring", "KPI", "tracking error", "ISO 9283", "robot_msgs"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Monitoring",
+]
+# WHY no runtime dependencies (Zach's "zero or one runtime dep" rule for cores): core, registry, record, rows and catalog are stdlib
+# only, so a host can import the library, list and configure every diagnostic, and write records without numpy. Only running a stock
+# check's arithmetic needs the `stock` extra; each heavy import is lazy (_numpy.py, _robot_metrics.py, _sim2real.py) and raises
+# ModuleNotFoundError naming the missing package, which a host reports as not_run.
+dependencies = []
+
+[project.optional-dependencies]
+# WHY `stock`, not `diagnostics` (the extra's name inside io-diagnostics until 2026-11-23): `robot-diagnostics[diagnostics]` says
+# nothing; this extra is what the stock checks compute with. Pillow decodes JPEG camera frames; robot-metrics and sim2real hold the
+# formulas the servo checks share (a diagnostic = a metric + a threshold).
+stock = ["numpy>=1.26", "Pillow>=10", "robot-metrics>=0.1.0", "sim2real>=0.1.0"]
+test = ["pytest>=8", "numpy>=1.26"]
+
+[project.urls]
+Homepage = "https://github.com/zacharyyamaoka/robot_diagnostics"
+Repository = "https://github.com/zacharyyamaoka/robot_diagnostics"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robot_diagnostics"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/robot_diagnostics", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+# WHY editable local paths (dev only; `uv build --no-sources` and PyPI ignore them): robot-metrics and sim2real are not on PyPI yet,
+# and their main checkouts ARE the code that runs. Absolute, as io-diagnostics and sim2real do for their siblings.
+[tool.uv.sources]
+robot-metrics = { path = "/home/bam/robot_metrics", editable = true }
+sim2real = { path = "/home/bam/sim2real", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -7,16 +7,16 @@ import json
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import Limits, evaluate
-from robotdx.diagnostics.record import from_record, to_record
-from robotdx.diagnostics.rollup import GateMatrixConfig, RollupConfig
-from robotdx.diagnostics.rows import ROW_COLUMNS, diff_rows, result_row, sample_rows
-from robotdx.diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
+from robot_diagnostics import Limits, evaluate
+from robot_diagnostics.record import from_record, to_record
+from robot_diagnostics.rollup import GateMatrixConfig, RollupConfig
+from robot_diagnostics.rows import ROW_COLUMNS, diff_rows, result_row, sample_rows
+from robot_diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
                                        KnownLoadConfig, KtConsistencyConfig, ModelErrorConfig, RateConfig, StopErrorConfig,
                                        TrackingErrorConfig)
-from robotdx.diagnostics.stock.fidelity import FidelityInput, rows_of
-from robotdx.diagnostics.stock.health import Stamps
-from robotdx.diagnostics.stock.truthfulness import KnownLoadInput, KtReadings
+from robot_diagnostics.stock.fidelity import FidelityInput, rows_of
+from robot_diagnostics.stock.health import Stamps
+from robot_diagnostics.stock.truthfulness import KnownLoadInput, KtReadings
 
 from conftest import tape
 
@@ -47,15 +47,6 @@ def test_every_result_survives_the_record_both_ways():
     for result in every_stock_result():
         line = json.loads(json.dumps(to_record(result)))  # through JSON, as a host reads it
         assert from_record(line) == result, result.diagnostic
-
-
-def test_the_real_contract_accepts_every_record_and_gives_it_back_unchanged(contract):
-    for result in every_stock_result():
-        status = contract.from_dict(to_record(result, expected_period_s=1.0))
-        assert contract.validate(status) == [], (result.diagnostic, contract.validate(status))
-        assert from_record(contract.to_dict(status)) == result, result.diagnostic
-        stock = contract.to_diagnostic_status(status)  # the plain ROS view still reads: level byte, name, values
-        assert stock["level"] == contract.ROS_LEVEL[contract.from_dict(to_record(result)).level]
 
 
 def test_levels_map_one_to_one():

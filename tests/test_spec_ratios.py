@@ -12,13 +12,13 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
-from robotdx.diagnostics.core import Result
-from robotdx.diagnostics.stock import (AgreementConfig, EventIntervalConfig, FeedbackShareConfig, ShareConfig, StalenessConfig,
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
+from robot_diagnostics.core import Result
+from robot_diagnostics.stock import (AgreementConfig, EventIntervalConfig, FeedbackShareConfig, ShareConfig, StalenessConfig,
                                        StampDelayConfig)
-from robotdx.diagnostics.stock.events import Event, EventLog, EvidenceStamps
-from robotdx.diagnostics.stock.health import StampPairs
-from robotdx.diagnostics.stock.truthfulness import Pair
+from robot_diagnostics.stock.events import Event, EventLog, EvidenceStamps
+from robot_diagnostics.stock.health import StampPairs
+from robot_diagnostics.stock.truthfulness import Pair
 
 from conftest import tape
 

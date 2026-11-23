@@ -9,10 +9,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import evaluate
-from robotdx.diagnostics.stock import ReprojectionConfig, ShareConfig
-from robotdx.diagnostics.stock.camera import CalibrationView, Camera, laplacian_variance, project
-from robotdx.diagnostics.stock.events import Event
+from robot_diagnostics import evaluate
+from robot_diagnostics.stock import ReprojectionConfig, ShareConfig
+from robot_diagnostics.stock.camera import CalibrationView, Camera, laplacian_variance, project
+from robot_diagnostics.stock.events import Event
 
 
 def test_laplacian_variance_is_opencvs():

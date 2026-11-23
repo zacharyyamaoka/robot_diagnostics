@@ -16,9 +16,9 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
-from robotdx.diagnostics.stock import ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig, SplitFidelityConfig
-from robotdx.diagnostics.stock.fidelity import SplitFidelityInput, split_input
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
+from robot_diagnostics.stock import ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig, SplitFidelityConfig
+from robot_diagnostics.stock.fidelity import SplitFidelityInput, split_input
 
 from conftest import tape
 

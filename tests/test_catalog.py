@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from robotdx.diagnostics import REGISTRY
-from robotdx.diagnostics.catalog import ENTRIES, PARTS, PRIMITIVES, problems
+from robot_diagnostics import REGISTRY
+from robot_diagnostics.catalog import ENTRIES, PARTS, PRIMITIVES, problems
 
 VAULT = Path("/home/bam/zach_brain")
 _WHERE = re.compile(r"^(?:f?\{?)?(.*?\.md)")

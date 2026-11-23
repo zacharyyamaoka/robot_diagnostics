@@ -5,7 +5,7 @@ stock checks robot_metrics v0 already computes - tracking error, the error at ev
 robot_metrics owns the math; RobotDx keeps its configs, Limits, judge, Result, records and UI. A metric's identity is its class and frozen
 config, never a limit, so a new target never makes a new metric (the prior-art note's fix to Limits riding inside each config).
 
-WHY lazy (as ``_numpy`` and ``_sim2real``): robot_metrics is in the ``diagnostics`` extra beside numpy, never a dependency of the host.
+WHY lazy (as ``_numpy`` and ``_sim2real``): robot_metrics is in the ``stock`` extra beside numpy, never a dependency of the host.
 Without it every module still imports and every stock Spec still registers; running a check that needs it raises ``ModuleNotFoundError``
 (name ``robot_metrics``, or ``numpy``), which the host reports as not_run.
 """

@@ -13,10 +13,10 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
-from robotdx.diagnostics.stock import (AllanConfig, HysteresisConfig, PathAccuracyConfig, PoseAccuracyConfig, StepResponseConfig)
-from robotdx.diagnostics.stock.characteristic import RateSeries
-from robotdx.diagnostics.stock.iso9283 import PathCycle, PoseSample
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
+from robot_diagnostics.stock import (AllanConfig, HysteresisConfig, PathAccuracyConfig, PoseAccuracyConfig, StepResponseConfig)
+from robot_diagnostics.stock.characteristic import RateSeries
+from robot_diagnostics.stock.iso9283 import PathCycle, PoseSample
 
 from conftest import tape
 

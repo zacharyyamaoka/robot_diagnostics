@@ -10,19 +10,19 @@ import json
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import REGISTRY, catalog, record
-from robotdx.diagnostics.core import FAIL, HINTS, NOT_RUN, PASS, VERDICTS, WARN, Limits, Result, config_dict
-from robotdx.diagnostics.defaults import DEFAULTS, GATING, LIMIT_SOURCES
-from robotdx.diagnostics.registry import NO_DATA, config_from_dict
-from robotdx.diagnostics.stock.camera import CalibrationView, DepthFrames, Frames, MarkerTrack
-from robotdx.diagnostics.stock.characteristic import RateSeries
-from robotdx.diagnostics.stock.events import Event, EventLog, EvidenceStamps
-from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
-from robotdx.diagnostics.stock.health import StampPairs, Stamps
-from robotdx.diagnostics.stock.iso9283 import PathCycle, PoseSample
-from robotdx.diagnostics.stock.spectral import SpectralSamples, SpectralTargets
-from robotdx.diagnostics.stock.truthfulness import KnownLoadInput, KtReadings, Pair
-from robotdx.diagnostics.data import Trajectory
+from robot_diagnostics import REGISTRY, catalog, record
+from robot_diagnostics.core import FAIL, HINTS, NOT_RUN, PASS, VERDICTS, WARN, Limits, Result, config_dict
+from robot_diagnostics.defaults import DEFAULTS, GATING, LIMIT_SOURCES
+from robot_diagnostics.registry import NO_DATA, config_from_dict
+from robot_diagnostics.stock.camera import CalibrationView, DepthFrames, Frames, MarkerTrack
+from robot_diagnostics.stock.characteristic import RateSeries
+from robot_diagnostics.stock.events import Event, EventLog, EvidenceStamps
+from robot_diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
+from robot_diagnostics.stock.health import StampPairs, Stamps
+from robot_diagnostics.stock.iso9283 import PathCycle, PoseSample
+from robot_diagnostics.stock.spectral import SpectralSamples, SpectralTargets
+from robot_diagnostics.stock.truthfulness import KnownLoadInput, KtReadings, Pair
+from robot_diagnostics.data import Trajectory
 
 from conftest import tape
 

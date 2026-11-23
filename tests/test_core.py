@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, Result, config_from_dict, evaluate, judge, names, worst
-from robotdx.diagnostics.core import HINTS, result
-from robotdx.diagnostics.registry import REGISTRY, Spec, load_toml, register
-from robotdx.diagnostics.stock import BoxConfig, CoverageConfig, StopErrorConfig, stop_error
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, Result, config_from_dict, evaluate, judge, names, worst
+from robot_diagnostics.core import HINTS, result
+from robot_diagnostics.registry import REGISTRY, Spec, load_toml, register
+from robot_diagnostics.stock import BoxConfig, CoverageConfig, StopErrorConfig, stop_error
 
 from conftest import tape
 

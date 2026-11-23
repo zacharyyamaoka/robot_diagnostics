@@ -1,6 +1,6 @@
 """The stock checks robot_metrics v0 computes - tracking error, the error at every stop, the limiter shares - compute through it.
 
-    uv run --project /home/bam/io-diagnostics --group dev pytest -q /home/bam/io-diagnostics/tests/diagnostics/test_robot_metrics_seam.py
+    uv run --extra test --extra stock pytest -q tests/test_robot_metrics_seam.py
 
 Zach, 2026-11-17 ("a diagnostic = a metric + a threshold"; docs/peps/0004-stock-diagnostics-on-robot-metrics.md): robot_metrics owns the
 math, RobotDx keeps its configs, Limits, judge, Result, records and UI. Written before the checks called robot_metrics (red first), in
@@ -20,13 +20,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import robot_metrics
-from robot_metrics import functional as rm_functional
-from robotdx.diagnostics import Limits, evaluate
-from robotdx.diagnostics.data import Trajectory
-from robotdx.diagnostics.stock import FaultCodesConfig, StopErrorConfig, TrackingErrorConfig, health, tracking
+robot_metrics = pytest.importorskip("robot_metrics", reason="robot-metrics (the stock extra) is not installed")
+from robot_metrics import functional as rm_functional  # noqa: E402
+from robot_diagnostics import Limits, evaluate
+from robot_diagnostics.data import Trajectory
+from robot_diagnostics import stock
+from robot_diagnostics.stock import FaultCodesConfig, StopErrorConfig, TrackingErrorConfig, health, tracking
 
-STOCK = Path(__file__).resolve().parents[2] / "robotdx" / "diagnostics" / "stock"
+# WHY from the module, not the checkout: the same test runs against an installed wheel
+STOCK = Path(stock.__file__).resolve().parent
 
 
 def _tape(offset_mrad: float = 0.0, name: str = "run") -> Trajectory:
@@ -133,9 +135,9 @@ PROBE = r"""
 import json, sys
 sys.modules["sim2real"] = None  # sim2real absent: importing it raises ModuleNotFoundError
 import numpy as np
-from robotdx.diagnostics import evaluate
-from robotdx.diagnostics.data import Trajectory
-from robotdx.diagnostics.stock import FaultCodesConfig, StopErrorConfig
+from robot_diagnostics import evaluate
+from robot_diagnostics.data import Trajectory
+from robot_diagnostics.stock import FaultCodesConfig, StopErrorConfig
 t = np.round(np.arange(0.0, 4.0, 0.01), 9)
 q_target = np.interp(t, [0.0, 1.0, 2.0, 3.0, 4.0], [0.0, 0.5, 0.5, 0.0, 0.0])
 qd_target = np.gradient(q_target, t)

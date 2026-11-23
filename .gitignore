@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+reports/media/
+# WHY no lock: its [tool.uv.sources] entries are this machine's absolute checkouts; CI and PyPI resolve from pyproject
+uv.lock

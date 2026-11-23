@@ -13,12 +13,12 @@ from pathlib import Path
 
 import numpy as np
 
-FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "data_ui_difference"
+FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "data_ui_difference"
 sys.path.insert(0, str(FIXTURE_DIR))
 import fixture  # noqa: E402  (data-ui's stdlib checker, in the fixture directory)
 
-from robotdx.diagnostics.data import Trajectory  # noqa: E402
-from robotdx.diagnostics.rows import diff_rows  # noqa: E402
+from robot_diagnostics.data import Trajectory  # noqa: E402
+from robot_diagnostics.rows import diff_rows  # noqa: E402
 
 RUN = "fixture/r1"
 SERVO = "J3 elbow"

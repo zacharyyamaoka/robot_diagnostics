@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from robotdx.diagnostics.data import Trajectory
+from robot_diagnostics.data import Trajectory
 
 RACK = Path("/archive/datasets/bam_rig")
 RACK_PROBE = RACK / "rack_2026-10-24" / "analysis" / "floors.json"
@@ -27,15 +28,28 @@ def tape(n: int = 600, dt: float = 0.01, *, offset: float = 0.0, run: str = "syn
                       tau_nm=np.zeros(n), run=run, device="CAN 99", labels=labels)
 
 
-@pytest.fixture(scope="session")
-def contract():
-    """io-diagnostics' record contract: this checkout's own ``contract.record`` (the library ships beside it)."""
-
-    from contract import record
-
-    return record
-
 
 # WHY a skip that names the path: the oracle reads bam_rack_twin's published files and the rack's npz runs; without them there is
 # nothing to compare against, and a faked oracle would prove nothing
 needs_rack = pytest.mark.skipif(not RACK_PROBE.is_file(), reason=f"rack npz data not on this machine: {RACK_PROBE} is missing")
+
+
+# WHY a skip only for a package that is genuinely absent: the `stock` extra's robot-metrics and sim2real (and robot-msgs under them) are
+# not on PyPI yet, so CI runs the core suite (stdlib + numpy) without them. A test that reaches one of them then fails with
+# ModuleNotFoundError naming it; that is reported as a skip naming the package, never as a pass. With the extra installed the tuple is
+# empty and nothing is converted, so locally (uv run --extra test --extra stock) every test runs for real.
+EXTRA_ABSENT = tuple(name for name in ("sim2real", "robot_metrics", "robot_msgs") if importlib.util.find_spec(name) is None)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    error = call.excinfo
+    if not (EXTRA_ABSENT and report.failed and error is not None and error.errisinstance(ModuleNotFoundError)):
+        return
+    missing = (error.value.name or "").split(".")[0]
+    if missing in EXTRA_ABSENT:
+        report.outcome = "skipped"
+        report.longrepr = (str(item.path), item.location[1] or 0, f"Skipped: needs {missing} (the stock extra), which is not installed")
+

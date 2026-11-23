@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
-from robotdx.diagnostics.adapters.rack_npz import load
-from robotdx.diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
+from robot_diagnostics.adapters.rack_npz import load
+from robot_diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
                                        KnownLoadConfig, KtConsistencyConfig, RateConfig, StopErrorConfig, TrackingErrorConfig)
-from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow
-from robotdx.diagnostics.stock.health import MOTEUS_CODES, Stamps
-from robotdx.diagnostics.stock.truthfulness import KnownLoadInput, KtReadings
+from robot_diagnostics.stock.fidelity import FidelityInput, ModelRow
+from robot_diagnostics.stock.health import MOTEUS_CODES, Stamps
+from robot_diagnostics.stock.truthfulness import KnownLoadInput, KtReadings
 
 from conftest import RACK, needs_rack
 

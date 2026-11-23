@@ -13,11 +13,11 @@ import math
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, Limits, evaluate
-from robotdx.diagnostics.stock import (DepthPlaneConfig, MarkerDriftConfig, ReprojectionConfig, SharpnessConfig, SpectralAngleConfig,
+from robot_diagnostics import FAIL, NOT_RUN, PASS, Limits, evaluate
+from robot_diagnostics.stock import (DepthPlaneConfig, MarkerDriftConfig, ReprojectionConfig, SharpnessConfig, SpectralAngleConfig,
                                        SpectralQualityConfig)
-from robotdx.diagnostics.stock.camera import CalibrationView, Camera, DepthFrames, Frames, MarkerTrack
-from robotdx.diagnostics.stock.spectral import SpectralSamples, SpectralTargets
+from robot_diagnostics.stock.camera import CalibrationView, Camera, DepthFrames, Frames, MarkerTrack
+from robot_diagnostics.stock.spectral import SpectralSamples, SpectralTargets
 
 
 def measures(result) -> dict:

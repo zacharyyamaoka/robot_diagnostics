@@ -4,7 +4,7 @@ Since 2026-11-17 (docs/peps/0004) tracking error and the stop error compute thro
 test_robot_metrics_seam.py in this file's spy-and-sentinel pattern; what stays on sim2real (the floor, fidelity, T2's split, coverage
 and the shared rulers) is held here.
 
-    uv run --project /home/bam/io-diagnostics --group dev pytest -q /home/bam/io-diagnostics/tests/diagnostics/test_sim2real_metrics.py
+    uv run --extra test --extra stock pytest -q tests/test_sim2real_metrics.py
 
 Zach, 2026-11-10 ("Sim2Real as a Pure Library on robot_msgs", step 4): RobotDx's stock checks duplicated bam_rack_twin's gates T1-T4 (the
 same checks twice, the Sim2Real MOC of Nov 4). Point them at the same sim2real.metrics functions. Written before the checks called sim2real
@@ -18,14 +18,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-import sim2real.metrics.actuator as actuator
+pytest.importorskip("sim2real", reason="sim2real (the stock extra) is not installed")
+import sim2real.metrics.actuator as actuator  # noqa: E402
 import sim2real.metrics.coverage as coverage
 import sim2real.metrics.series as series
-from robotdx.diagnostics import data, evaluate
-from robotdx.diagnostics.data import Trajectory
-from robotdx.diagnostics.stock import (CoverageConfig, FidelityRatioConfig, FloorConfig, ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig,
+from robot_diagnostics import data, evaluate
+from robot_diagnostics.data import Trajectory
+from robot_diagnostics.stock import (CoverageConfig, FidelityRatioConfig, FloorConfig, ModelErrorConfig, MoveHoldSplitConfig, RestOffsetConfig,
                                        SplitFidelityConfig)
-from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
+from robot_diagnostics.stock.fidelity import FidelityInput, ModelRow, SplitFidelityInput
 
 
 def _tape(offset_mrad: float = 0.0, name: str = "run") -> Trajectory:

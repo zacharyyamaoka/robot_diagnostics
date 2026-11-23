@@ -1,0 +1,19 @@
+# The core suite: stdlib + numpy. The tests of the `stock` extra's seams to robot-metrics and sim2real skip here until those two are on
+# PyPI; then add `--extra stock` to the run line (they run locally: uv run --extra test --extra stock python -m pytest -q).
+name: test
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # WHY uv pip, not uv run: uv run locks every extra, and the stock extra's robot-metrics and sim2real are not on PyPI yet;
+      # --no-sources because the [tool.uv.sources] paths are this machine's checkouts, absent on a runner
+      - run: uv venv --python ${{ matrix.python }}
+      - run: uv pip install --no-sources '.[test]'
+      - run: .venv/bin/python -m pytest -q

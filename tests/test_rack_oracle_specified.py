@@ -22,9 +22,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import NOT_RUN, evaluate
-from robotdx.diagnostics.adapters.rack_npz import load
-from robotdx.diagnostics.stock import FeedbackShareConfig
+from robot_diagnostics import NOT_RUN, evaluate
+from robot_diagnostics.adapters.rack_npz import load
+from robot_diagnostics.stock import FeedbackShareConfig
 
 from conftest import RACK, needs_rack
 
@@ -102,7 +102,7 @@ PRESLIDING = dict(legs="target", stiffness="leg_median", headline="compliance", 
 
 @pytest.mark.parametrize("can", [12, 13])
 def test_presliding_compliance_matches_bam_rack_twin(can):
-    from robotdx.diagnostics.stock import HysteresisConfig
+    from robot_diagnostics.stock import HysteresisConfig
 
     runs = [_fine(path, can) for path in sorted((PRESLIDING_SESSION / "runs").glob(f"*_can{can}_waypoints.npz"))]
     out = evaluate("stock.hysteresis_loop", HysteresisConfig(**PRESLIDING), runs, subject=f"rack/can{can}")
@@ -116,7 +116,7 @@ def test_presliding_compliance_matches_bam_rack_twin(can):
 def test_presliding_compliance_ruler_can_fail():
     # without round2's "still stuck" box the legs that slid come in (12, not 8) and the compliance moves off the published number:
     # the selection rule is part of the ruler, and the check notices when it changes
-    from robotdx.diagnostics.stock import HysteresisConfig
+    from robot_diagnostics.stock import HysteresisConfig
 
     runs = [_fine(path, 12) for path in sorted((PRESLIDING_SESSION / "runs").glob("*_can12_waypoints.npz"))]
     slid = evaluate("stock.hysteresis_loop", HysteresisConfig(**{**PRESLIDING, "max_leg_travel_rad": None}), runs, subject="rack/can12")
@@ -128,7 +128,7 @@ def test_step_response_on_the_velocity_plateaus_runs_and_finds_no_settled_revers
     """No published number to match: what the session itself found ("nothing slides at 0.01 rad/s in 2 s") must show as an unsettled
     reversal into the -0.01 rad/s plateau, on both stations."""
 
-    from robotdx.diagnostics.stock import StepResponseConfig
+    from robot_diagnostics.stock import StepResponseConfig
 
     for can, name in ((12, "s08_can12_friction"), (13, "s16_can13_friction")):
         run = load(PRESLIDING_SESSION / "runs" / f"{name}.npz")

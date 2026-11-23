@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from robotdx.diagnostics import evaluate
-from robotdx.diagnostics.adapters.rack_npz import load
-from robotdx.diagnostics.stock import MoveHoldSplitConfig
+from robot_diagnostics import evaluate
+from robot_diagnostics.adapters.rack_npz import load
+from robot_diagnostics.stock import MoveHoldSplitConfig
 
 from conftest import RACK
 

@@ -7,17 +7,17 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from robotdx.diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
-from robotdx.diagnostics.record import from_record, to_record
-from robotdx.diagnostics.rollup import GateMatrixConfig, RollupConfig
-from robotdx.diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
+from robot_diagnostics import FAIL, NOT_RUN, PASS, WARN, Limits, evaluate
+from robot_diagnostics.record import from_record, to_record
+from robot_diagnostics.rollup import GateMatrixConfig, RollupConfig
+from robot_diagnostics.stock import (BoxConfig, CoverageConfig, FaultCodesConfig, FidelityRatioConfig, FloorConfig,
                                        KnownLoadConfig, KtConsistencyConfig, ModelErrorConfig, RateConfig, StopErrorConfig,
                                        TrackingErrorConfig)
-from robotdx.diagnostics.stock.fidelity import FidelityInput, ModelRow, rows_of
-from robotdx.diagnostics.stock.health import Stamps
-from robotdx.diagnostics.stock.truthfulness import GRAVITY, KnownLoadInput, KtReadings
-from robotdx.diagnostics.stock.tracking import stops
-from robotdx.diagnostics.stream import monitor, windows
+from robot_diagnostics.stock.fidelity import FidelityInput, ModelRow, rows_of
+from robot_diagnostics.stock.health import Stamps
+from robot_diagnostics.stock.truthfulness import GRAVITY, KnownLoadInput, KtReadings
+from robot_diagnostics.stock.tracking import stops
+from robot_diagnostics.stream import monitor, windows
 
 from conftest import tape
 

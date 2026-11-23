@@ -9,21 +9,21 @@ from dataclasses import replace
 
 import numpy as np
 
-from robotdx.diagnostics import NOT_RUN, REGISTRY, Limits, evaluate
-from robotdx.diagnostics.catalog import PRIMITIVES
-from robotdx.diagnostics.record import from_record, to_record
-from robotdx.diagnostics.rows import ROW_COLUMNS, result_row
-from robotdx.diagnostics.stock import (AgreementConfig, AllanConfig, DepthPlaneConfig, EventIntervalConfig, FeedbackShareConfig,
+from robot_diagnostics import NOT_RUN, REGISTRY, Limits, evaluate
+from robot_diagnostics.catalog import PRIMITIVES
+from robot_diagnostics.record import from_record, to_record
+from robot_diagnostics.rows import ROW_COLUMNS, result_row
+from robot_diagnostics.stock import (AgreementConfig, AllanConfig, DepthPlaneConfig, EventIntervalConfig, FeedbackShareConfig,
                                        HysteresisConfig, MarkerDriftConfig, PathAccuracyConfig, PoseAccuracyConfig, ReprojectionConfig,
                                        ShareConfig, SharpnessConfig, SpectralAngleConfig, SpectralQualityConfig, StalenessConfig,
                                        StampDelayConfig, StepResponseConfig)
-from robotdx.diagnostics.stock.camera import CalibrationView, DepthFrames, Frames, MarkerTrack
-from robotdx.diagnostics.stock.characteristic import RateSeries
-from robotdx.diagnostics.stock.events import Event, EventLog, EvidenceStamps
-from robotdx.diagnostics.stock.health import StampPairs
-from robotdx.diagnostics.stock.iso9283 import PathCycle, PoseSample
-from robotdx.diagnostics.stock.spectral import SpectralSamples, SpectralTargets
-from robotdx.diagnostics.stock.truthfulness import Pair
+from robot_diagnostics.stock.camera import CalibrationView, DepthFrames, Frames, MarkerTrack
+from robot_diagnostics.stock.characteristic import RateSeries
+from robot_diagnostics.stock.events import Event, EventLog, EvidenceStamps
+from robot_diagnostics.stock.health import StampPairs
+from robot_diagnostics.stock.iso9283 import PathCycle, PoseSample
+from robot_diagnostics.stock.spectral import SpectralSamples, SpectralTargets
+from robot_diagnostics.stock.truthfulness import Pair
 
 from conftest import tape
 
@@ -83,12 +83,11 @@ def test_each_specified_primitive_computes_once_and_is_not_run_once():
         assert missing.verdict == NOT_RUN and missing.code and missing.value is None, missing.diagnostic
 
 
-def test_every_specified_result_survives_the_record_and_the_real_contract(contract):
+# WHY no contract here: the record contract (contract.record) belongs to the host that reads these records; io-diagnostics' suite
+# checks every record against it (its tests/diagnostics). This library writes the record's JSON shape and proves the round trip.
+def test_every_specified_result_survives_the_record():
     for result in computed_and_not_run():
         line = json.loads(json.dumps(to_record(result)))
         assert from_record(line) == result, result.diagnostic
-        status = contract.from_dict(to_record(result, expected_period_s=1.0))
-        assert contract.validate(status) == [], (result.diagnostic, contract.validate(status))
-        assert from_record(contract.to_dict(status)) == result, result.diagnostic
         row = result_row(result)
         assert tuple(row) == ROW_COLUMNS and row["hint"] == PRIMITIVES[result.diagnostic].hint
