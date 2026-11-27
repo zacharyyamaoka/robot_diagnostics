@@ -25,6 +25,7 @@ from .response import StepResponseConfig, step_response
 from .health import BoxConfig, FaultCodesConfig, RateConfig, StampDelayConfig, box, fault_codes, sample_rate, stamp_delay
 from .spectral import SpectralAngleConfig, SpectralQualityConfig, spectral_angle, spectral_quality
 from .tracking import StopErrorConfig, TrackingErrorConfig, stop_error, tracking_error
+from .jtc import JTC
 from .truthfulness import AgreementConfig, KnownLoadConfig, KtConsistencyConfig, agreement, known_load_gain, kt_consistency
 
 STOCK = [
@@ -103,5 +104,6 @@ STOCK = [
          summary="spectral angle mapper (Kruse 1993) between measured and reference spectra per material"),
 ]
 
-for _spec in STOCK:
+# WHY its own list: the JTC diagnostics are one monitor (jtc.py) asked five questions, not five primitives
+for _spec in STOCK + JTC:
     register(_spec)
