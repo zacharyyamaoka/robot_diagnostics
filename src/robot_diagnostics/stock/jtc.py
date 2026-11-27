@@ -162,7 +162,7 @@ def _array(values, count: int, fill: float = math.nan):
 def _since(since, condition, t: float):
     """When each joint's condition became true (NaN while false): the start of its dwell."""
 
-    return np.where(condition, np.where(np.isnan(since), t, since), np.nan)
+    return np.where(condition, np.fmin(since, t), np.nan)  # fmin ignores NaN: a new dwell starts at t
 
 
 class JtcMonitor:
@@ -186,6 +186,11 @@ class JtcMonitor:
             self._low, self._high = limits[:, 0], limits[:, 1]
         else:
             self._low = self._high = None
+        # constants a tick reuses (read-only, so a caller cannot change them through a returned row)
+        self._goal_line = np.where(self._goal_tol > 0.0, self._goal_tol, np.inf)
+        self._path_on = self._path_tol > 0.0
+        self._nan = np.full(count, np.nan)
+        self._nan.flags.writeable = False
         self._last_t: float | None = None
         # WHY "since" times, not summed dts: a dwell is time spent over the line, measured from the first tick that was
         # over it; summing dt would count the gap before that tick (a 10 ms dwell would pass on its first tick)
@@ -235,9 +240,11 @@ class JtcMonitor:
         progress = math.nan if not math.isfinite(end) else (1.0 if end <= 0.0 else min(max(clock / end, 0.0), 1.0))
 
         # tracking (ros2 JTC: path while running, goal after the end)
-        path_margin = np.where(running & (self._path_tol > 0.0), self._path_tol - np.abs(error), np.nan)
-        speed_ok = np.abs(qd) <= config.stopped_velocity_rad_s if tick.qd is not None else np.ones(count, dtype=bool)
-        goal_ok = (np.abs(error) <= np.where(self._goal_tol > 0.0, self._goal_tol, np.inf)) & speed_ok
+        abs_error = np.abs(error)
+        path_margin = np.where(self._path_on, self._path_tol - abs_error, np.nan) if running else self._nan
+        goal_ok = abs_error <= self._goal_line
+        if tick.qd is not None:
+            goal_ok &= np.abs(qd) <= config.stopped_velocity_rad_s
         settled = np.where(running, np.nan, goal_ok.astype(float))
         late = 0.0 if running or goal_ok.all() else max(clock - end, 0.0)
 
@@ -248,10 +255,12 @@ class JtcMonitor:
         moving = np.abs(qd_target) > self._moving
         lead = np.where(moving, np.sign(qd_target) * error, np.nan)
         slow = np.abs(qd) < self._stall if tick.qd is not None else np.zeros(count, dtype=bool)
-        lagging = moving & (np.nan_to_num(lead, nan=-np.inf) > self._lead)
+        # WHY no nan_to_num in step: a comparison with NaN is already False, and nan_to_num was 40 % of a tick (I-003)
+        lagging = moving & (lead > self._lead)
         filtered = self._low_pass(residual, dt)
-        over_contact = np.nan_to_num(np.abs(filtered), nan=0.0) > self._contact
-        over_collision = np.nan_to_num(np.abs(filtered), nan=0.0) > self._collision
+        magnitude = np.abs(filtered)
+        over_contact = magnitude > self._contact
+        over_collision = magnitude > self._collision
         self._blocked_since = _since(self._blocked_since, lagging & slow, t)
         self._contact_since = _since(self._contact_since, over_contact, t)
         self._collision_since = _since(self._collision_since, over_collision, t)
@@ -270,23 +279,20 @@ class JtcMonitor:
         # speed, limits, servo
         overspeed = np.abs(qd) - self._max_speed
         drive_power = effort * qd
-        if self._low is not None:
-            limit_margin = np.minimum(q - self._low, self._high - q)
-        else:
-            limit_margin = np.full(count, np.nan)
-        timeout = np.zeros(count) if mode is None else (mode == MODE_TIMEOUT).astype(float)
-        fault = np.zeros(count) if mode is None else (mode == MODE_FAULT).astype(float)
+        limit_margin = np.minimum(q - self._low, self._high - q) if self._low is not None else self._nan
         if mode is None:
-            timeout[:] = np.nan
-            fault[:] = np.nan
+            timeout = fault = self._nan
+        else:
+            timeout = (mode == MODE_TIMEOUT).astype(float)
+            fault = (mode == MODE_FAULT).astype(float)
 
         # verdict: the first decisive thing that happened stays the outcome (ros2 JTC aborts once)
         if self._outcome == RUNNING:
-            if np.nan_to_num(fault).any():
+            if (fault > 0.5).any():
                 self._outcome = SERVO_FAULT
             elif collision.any():
                 self._outcome = COLLISION
-            elif (np.nan_to_num(path_margin, nan=0.0) < 0.0).any():
+            elif (path_margin < 0.0).any():
                 self._outcome = PATH_TOLERANCE_VIOLATED
             elif not running and goal_ok.all():
                 self._outcome = SUCCEEDED
@@ -297,12 +303,13 @@ class JtcMonitor:
                                     "name": OUTCOME_NAMES[self._outcome]})
 
         flags = {"blocked": blocked, "contact": contact, "collision": collision,
-                 "servo_timeout": np.nan_to_num(timeout) > 0.5, "servo_fault": np.nan_to_num(fault) > 0.5}
+                 "servo_timeout": timeout > 0.5, "servo_fault": fault > 0.5}
         for name, now in flags.items():
             rose = now & ~self._flag_state[name]
-            for index in np.flatnonzero(rose):
-                self.events.append({"t": t, "kind": name, "joint": self.joint_names[index]})
-            self._flag_state[name] = now.copy()
+            if rose.any():
+                for index in np.flatnonzero(rose):
+                    self.events.append({"t": t, "kind": name, "joint": self.joint_names[index]})
+            self._flag_state[name] = now
 
         state_age = math.nan if tick.state_t is None else t - float(tick.state_t)
         return {
@@ -324,7 +331,7 @@ class JtcMonitor:
             self._filtered = np.where(np.isfinite(residual), residual, 0.0)
             return self._filtered.copy()
         alpha = dt / (dt + 1.0 / (2.0 * math.pi * hz))
-        self._filtered = self._filtered + alpha * (np.nan_to_num(residual, nan=0.0) - self._filtered)
+        self._filtered = self._filtered + alpha * (np.where(np.isfinite(residual), residual, 0.0) - self._filtered)
         return self._filtered.copy()
 
 
