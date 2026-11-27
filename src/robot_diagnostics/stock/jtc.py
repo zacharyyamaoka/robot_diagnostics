@@ -159,142 +159,172 @@ def _array(values, count: int, fill: float = math.nan):
     return np.asarray(values, dtype=float).reshape(count)
 
 
-def _since(since, condition, t: float):
-    """When each joint's condition became true (NaN while false): the start of its dwell."""
+def _since(since: float, condition: bool, t: float) -> float:
+    """When a joint's condition became true (NaN while false): the start of its dwell."""
 
-    return np.where(condition, np.fmin(since, t), np.nan)  # fmin ignores NaN: a new dwell starts at t
+    if not condition:
+        return math.nan
+    return t if math.isnan(since) else since
 
 
 class JtcMonitor:
-    """Every JTC diagnostic for one tick at a time. Causal: a tick's numbers depend only on it and the ticks before."""
+    """Every JTC diagnostic for one tick at a time. Causal: a tick's numbers depend only on it and the ticks before.
+
+    WHY plain floats per joint inside ``step``, not numpy on (J,) arrays: an arm has a handful of joints, and each numpy
+    call on a 2-element array costs ~0.5 µs, so the vectorised step took ~95 µs a tick against a 50 µs budget (JTC
+    Diagnostics track I-003, 2026-11-27). The rules are the same; only the rows it returns are numpy arrays.
+    """
 
     def __init__(self, config: JtcConfig, joint_names: Sequence[str]) -> None:
         self.config = config
         self.joint_names = tuple(joint_names)
         count = len(self.joint_names)
         self._count = count
-        self._path_tol = _per_joint(config.path_tolerance_rad, count, "path_tolerance_rad")
-        self._goal_tol = _per_joint(config.goal_tolerance_rad, count, "goal_tolerance_rad")
-        self._moving = _per_joint(config.moving_speed_rad_s, count, "moving_speed_rad_s")
-        self._lead = _per_joint(config.lead_rad, count, "lead_rad")
-        self._stall = _per_joint(config.stall_speed_rad_s, count, "stall_speed_rad_s")
-        self._contact = _per_joint(config.contact_nm, count, "contact_nm")
-        self._collision = _per_joint(config.collision_nm, count, "collision_nm")
-        self._max_speed = _per_joint(config.max_speed_rad_s, count, "max_speed_rad_s")
+
+        def line(value, name):
+            return _per_joint(value, count, name).tolist()
+
+        self._path_tol = line(config.path_tolerance_rad, "path_tolerance_rad")
+        self._goal_line = [tol if tol > 0.0 else math.inf for tol in line(config.goal_tolerance_rad, "goal_tolerance_rad")]
+        self._moving = line(config.moving_speed_rad_s, "moving_speed_rad_s")
+        self._lead = line(config.lead_rad, "lead_rad")
+        self._stall = line(config.stall_speed_rad_s, "stall_speed_rad_s")
+        self._contact = line(config.contact_nm, "contact_nm")
+        self._collision = line(config.collision_nm, "collision_nm")
+        self._max_speed = line(config.max_speed_rad_s, "max_speed_rad_s")
         if config.position_limits_rad:
             limits = np.asarray(config.position_limits_rad, dtype=float).reshape(count, 2)
-            self._low, self._high = limits[:, 0], limits[:, 1]
+            self._low, self._high = limits[:, 0].tolist(), limits[:, 1].tolist()
         else:
             self._low = self._high = None
-        # constants a tick reuses (read-only, so a caller cannot change them through a returned row)
-        self._goal_line = np.where(self._goal_tol > 0.0, self._goal_tol, np.inf)
-        self._path_on = self._path_tol > 0.0
-        self._nan = np.full(count, np.nan)
-        self._nan.flags.writeable = False
+        self._nans = [math.nan] * count
         self._last_t: float | None = None
         # WHY "since" times, not summed dts: a dwell is time spent over the line, measured from the first tick that was
         # over it; summing dt would count the gap before that tick (a 10 ms dwell would pass on its first tick)
-        self._blocked_since = np.full(count, np.nan)
-        self._contact_since = np.full(count, np.nan)
-        self._collision_since = np.full(count, np.nan)
-        self._latched = np.zeros(count, dtype=bool)
-        self._filtered = None  # the low-passed residual (None until the first finite one)
+        self._blocked_since = [math.nan] * count
+        self._contact_since = [math.nan] * count
+        self._collision_since = [math.nan] * count
+        self._latched = [False] * count
+        self._filtered: list[float] | None = None  # the low-passed residual (None until the first tick)
         self._disturbed_t = -math.inf  # the last tick that missed periods or saw a board time out or fault
         self._outcome = RUNNING
-        self._flag_state = {name: np.zeros(count, dtype=bool) for name in FLAGS}
+        self._flag_state = {name: [False] * count for name in FLAGS}
         self.events: list[dict[str, Any]] = []  # {"t", "kind", "joint"}: each flag's rise on each joint, and the outcome
 
     @property
     def outcome(self) -> int:
         return self._outcome
 
+    def _values(self, values, fill: float = math.nan) -> list[float]:
+        if values is None:
+            return [fill] * self._count
+        out = values.tolist() if hasattr(values, "tolist") else [float(v) for v in values]
+        if len(out) != self._count:
+            raise ValueError(f"a tick field has {len(out)} values for {self._count} joints")
+        return [float(v) for v in out]
+
     def step(self, tick: JtcTick) -> dict[str, Any]:
-        config, count = self.config, self._count
+        config, count, isfinite, nan = self.config, self._count, math.isfinite, math.nan
         t = float(tick.t)
         dt = 0.0 if self._last_t is None else t - self._last_t
         if dt < 0.0:
             raise ValueError(f"tick times go backwards: {t} after {self._last_t}")
-        period = math.nan if self._last_t is None else dt
+        period = nan if self._last_t is None else dt
         self._last_t = t
         nominal = config.nominal_period_s
         missed = 0.0 if not (period > config.missed_factor * nominal) else float(round(period / nominal) - 1)
 
-        q_target = _array(tick.q_target, count)
-        q = _array(tick.q, count)
-        qd_target = _array(tick.qd_target, count, 0.0)
-        qd = _array(tick.qd, count)
-        effort = _array(tick.effort, count)
-        effort_target = _array(tick.effort_target, count, 0.0)
-        q_command = _array(tick.q_command, count)
-        qd_command = _array(tick.qd_command, count)
-        effort_command = _array(tick.effort_command, count)
-        cap = _array(tick.max_effort, count)
-        mode = None if tick.mode is None else np.asarray(tick.mode, dtype=float).reshape(count)
+        q_target, q = self._values(tick.q_target), self._values(tick.q)
+        qd_target, qd = self._values(tick.qd_target, 0.0), self._values(tick.qd)
+        effort, effort_target = self._values(tick.effort), self._values(tick.effort_target, 0.0)
+        q_command, qd_command = self._values(tick.q_command), self._values(tick.qd_command)
+        effort_command, cap = self._values(tick.effort_command), self._values(tick.max_effort)
+        mode = None if tick.mode is None else self._values(tick.mode)
+        has_qd = tick.qd is not None
 
-        sent = (np.isfinite(q_command) | np.isfinite(qd_command) | np.isfinite(effort_command)).astype(float)
-        error = q_target - q
-        velocity_error = qd_target - qd
         clock = t if tick.target_clock_s is None else float(tick.target_clock_s)
-        end = math.nan if tick.end_s is None else float(tick.end_s)
+        end = nan if tick.end_s is None else float(tick.end_s)
         running = not (clock >= end)  # NaN end: the target is always running
-        progress = math.nan if not math.isfinite(end) else (1.0 if end <= 0.0 else min(max(clock / end, 0.0), 1.0))
+        progress = nan if not isfinite(end) else (1.0 if end <= 0.0 else min(max(clock / end, 0.0), 1.0))
 
-        # tracking (ros2 JTC: path while running, goal after the end)
-        abs_error = np.abs(error)
-        path_margin = np.where(self._path_on, self._path_tol - abs_error, np.nan) if running else self._nan
-        goal_ok = abs_error <= self._goal_line
-        if tick.qd is not None:
-            goal_ok &= np.abs(qd) <= config.stopped_velocity_rad_s
-        settled = np.where(running, np.nan, goal_ok.astype(float))
-        late = 0.0 if running or goal_ok.all() else max(clock - end, 0.0)
-
-        # effort and contact
-        residual = effort - effort_target
-        cap_known = np.isfinite(cap) & (cap > 0.0)
-        at_cap = np.where(cap_known & np.isfinite(effort), np.abs(effort) >= config.cap_fraction * cap, False)
-        moving = np.abs(qd_target) > self._moving
-        lead = np.where(moving, np.sign(qd_target) * error, np.nan)
-        slow = np.abs(qd) < self._stall if tick.qd is not None else np.zeros(count, dtype=bool)
-        # WHY no nan_to_num in step: a comparison with NaN is already False, and nan_to_num was 40 % of a tick (I-003)
-        lagging = moving & (lead > self._lead)
-        filtered = self._low_pass(residual, dt)
-        magnitude = np.abs(filtered)
-        over_contact = magnitude > self._contact
-        over_collision = magnitude > self._collision
-        self._blocked_since = _since(self._blocked_since, lagging & slow, t)
-        self._contact_since = _since(self._contact_since, over_contact, t)
-        self._collision_since = _since(self._collision_since, over_collision, t)
-        blocked = (lagging & slow) & (t - self._blocked_since + 1e-12 >= config.blocked_dwell_s)
-        contact = over_contact & (t - self._contact_since + 1e-12 >= config.residual_dwell_s)
-        hit = blocked | (over_collision & (t - self._collision_since + 1e-12 >= config.residual_dwell_s)) | (at_cap & lagging)
-        if missed > 0.0 or (mode is not None and bool(np.any((mode == MODE_TIMEOUT) | (mode == MODE_FAULT)))):
-            self._disturbed_t = t
-        if config.recover_s > 0.0 and t - self._disturbed_t <= config.recover_s:
-            blocked = np.zeros(count, dtype=bool)
-            contact = np.zeros(count, dtype=bool)
-            hit = np.zeros(count, dtype=bool)
-        self._latched |= hit
-        collision = self._latched.copy()
-
-        # speed, limits, servo
-        overspeed = np.abs(qd) - self._max_speed
-        drive_power = effort * qd
-        limit_margin = np.minimum(q - self._low, self._high - q) if self._low is not None else self._nan
-        if mode is None:
-            timeout = fault = self._nan
+        # the residual's low-pass (first order), its state seeded on the first tick
+        hz = config.residual_filter_hz
+        residual = [effort[i] - effort_target[i] for i in range(count)]
+        if not hz > 0.0:
+            filtered = residual
+        elif self._filtered is None or dt <= 0.0:
+            filtered = [r if isfinite(r) else 0.0 for r in residual]
         else:
-            timeout = (mode == MODE_TIMEOUT).astype(float)
-            fault = (mode == MODE_FAULT).astype(float)
+            alpha = dt / (dt + 1.0 / (2.0 * math.pi * hz))
+            filtered = [f + alpha * ((r if isfinite(r) else 0.0) - f) for f, r in zip(self._filtered, residual)]
+        if hz > 0.0:
+            self._filtered = filtered
+
+        disturbed = missed > 0.0 or (mode is not None and any(m in (MODE_TIMEOUT, MODE_FAULT) for m in mode))
+        if disturbed:
+            self._disturbed_t = t
+        holding_off = config.recover_s > 0.0 and t - self._disturbed_t <= config.recover_s
+
+        sent, offset, error, velocity_error, path_margin, settled = [], [], [], [], [], []
+        at_cap, lead, blocked, contact, collision = [], [], [], [], []
+        overspeed, drive_power, limit_margin, timeout, fault = [], [], [], [], []
+        all_goal = True
+        for i in range(count):
+            e = q_target[i] - q[i]
+            sent.append(1.0 if (isfinite(q_command[i]) or isfinite(qd_command[i]) or isfinite(effort_command[i])) else 0.0)
+            offset.append(q_command[i] - q_target[i])
+            error.append(e)
+            velocity_error.append(qd_target[i] - qd[i])
+            abs_e = abs(e)
+            path_margin.append(self._path_tol[i] - abs_e if running and self._path_tol[i] > 0.0 else nan)
+            goal_ok = abs_e <= self._goal_line[i] and (not has_qd or abs(qd[i]) <= config.stopped_velocity_rad_s)
+            all_goal = all_goal and goal_ok
+            settled.append(nan if running else float(goal_ok))
+
+            capped = isfinite(cap[i]) and cap[i] > 0.0 and isfinite(effort[i]) and abs(effort[i]) >= config.cap_fraction * cap[i]
+            at_cap.append(1.0 if capped else 0.0)
+            moving = abs(qd_target[i]) > self._moving[i]
+            lead_i = (e if qd_target[i] > 0.0 else -e) if moving else nan
+            lead.append(lead_i)
+            slow = has_qd and abs(qd[i]) < self._stall[i]
+            lagging = moving and lead_i > self._lead[i]
+            magnitude = abs(filtered[i])
+            over_contact, over_collision = magnitude > self._contact[i], magnitude > self._collision[i]
+            self._blocked_since[i] = _since(self._blocked_since[i], lagging and slow, t)
+            self._contact_since[i] = _since(self._contact_since[i], over_contact, t)
+            self._collision_since[i] = _since(self._collision_since[i], over_collision, t)
+            blocked_i = lagging and slow and t - self._blocked_since[i] + 1e-12 >= config.blocked_dwell_s
+            contact_i = over_contact and t - self._contact_since[i] + 1e-12 >= config.residual_dwell_s
+            hit = blocked_i or (over_collision and t - self._collision_since[i] + 1e-12 >= config.residual_dwell_s) \
+                or (capped and lagging)
+            if holding_off:
+                blocked_i = contact_i = hit = False
+            self._latched[i] = self._latched[i] or hit
+            blocked.append(1.0 if blocked_i else 0.0)
+            contact.append(1.0 if contact_i else 0.0)
+            collision.append(1.0 if self._latched[i] else 0.0)
+
+            overspeed.append(abs(qd[i]) - self._max_speed[i])
+            drive_power.append(effort[i] * qd[i])
+            if self._low is None:
+                limit_margin.append(nan)
+            else:
+                low, high = q[i] - self._low[i], self._high[i] - q[i]
+                limit_margin.append(min(low, high) if isfinite(low) and isfinite(high) else nan)
+            timeout.append(nan if mode is None else float(mode[i] == MODE_TIMEOUT))
+            fault.append(nan if mode is None else float(mode[i] == MODE_FAULT))
+
+        late = 0.0 if running or all_goal else max(clock - end, 0.0)
 
         # verdict: the first decisive thing that happened stays the outcome (ros2 JTC aborts once)
         if self._outcome == RUNNING:
-            if (fault > 0.5).any():
+            if any(f > 0.5 for f in fault):
                 self._outcome = SERVO_FAULT
-            elif collision.any():
+            elif any(self._latched):
                 self._outcome = COLLISION
-            elif (path_margin < 0.0).any():
+            elif any(m < 0.0 for m in path_margin):
                 self._outcome = PATH_TOLERANCE_VIOLATED
-            elif not running and goal_ok.all():
+            elif not running and all_goal:
                 self._outcome = SUCCEEDED
             elif not running and clock - end > config.goal_time_s:
                 self._outcome = GOAL_TOLERANCE_VIOLATED
@@ -302,37 +332,28 @@ class JtcMonitor:
                 self.events.append({"t": t, "kind": "outcome", "joint": "", "code": self._outcome,
                                     "name": OUTCOME_NAMES[self._outcome]})
 
-        flags = {"blocked": blocked, "contact": contact, "collision": collision,
-                 "servo_timeout": timeout > 0.5, "servo_fault": fault > 0.5}
-        for name, now in flags.items():
-            rose = now & ~self._flag_state[name]
-            if rose.any():
-                for index in np.flatnonzero(rose):
+        flags = {"blocked": blocked, "contact": contact, "collision": collision, "servo_timeout": timeout, "servo_fault": fault}
+        for name, values in flags.items():
+            before = self._flag_state[name]
+            now = [v > 0.5 for v in values]
+            for index in range(count):
+                if now[index] and not before[index]:
                     self.events.append({"t": t, "kind": name, "joint": self.joint_names[index]})
             self._flag_state[name] = now
 
-        state_age = math.nan if tick.state_t is None else t - float(tick.state_t)
-        return {
-            "command_sent": sent, "command_offset_rad": q_command - q_target, "effort_cap_nm": cap,
-            "tick_period_s": period, "missed_ticks": missed, "state_age_s": state_age, "progress": progress,
-            "late_s": late, "position_error_rad": error, "velocity_error_rad_s": velocity_error,
-            "path_margin_rad": path_margin, "settled": settled, "effort_residual_nm": residual,
-            "at_cap": at_cap.astype(float), "lead_rad": lead, "blocked": blocked.astype(float),
-            "contact": contact.astype(float), "collision": collision.astype(float), "overspeed_rad_s": overspeed,
-            "drive_power_w": drive_power, "limit_margin_rad": limit_margin, "servo_timeout": timeout,
-            "servo_fault": fault, "outcome": float(self._outcome), "effort_residual_filtered_nm": filtered,
-        }
+        state_age = nan if tick.state_t is None else t - float(tick.state_t)
+        block = np.array((sent, offset, cap, error, velocity_error, path_margin, settled, residual, at_cap, lead, blocked,
+                          contact, collision, overspeed, drive_power, limit_margin, timeout, fault, filtered), dtype=float)
+        row = dict(zip(_BLOCK, block))
+        row.update({"tick_period_s": period, "missed_ticks": missed, "state_age_s": state_age, "progress": progress,
+                    "late_s": late, "outcome": float(self._outcome)})
+        return row
 
-    def _low_pass(self, residual, dt: float):
-        hz = self.config.residual_filter_hz
-        if not hz > 0.0:
-            return residual
-        if self._filtered is None or dt <= 0.0:
-            self._filtered = np.where(np.isfinite(residual), residual, 0.0)
-            return self._filtered.copy()
-        alpha = dt / (dt + 1.0 / (2.0 * math.pi * hz))
-        self._filtered = self._filtered + alpha * (np.where(np.isfinite(residual), residual, 0.0) - self._filtered)
-        return self._filtered.copy()
+
+# the per-joint rows of ``step``'s one (19, J) block, in its order
+_BLOCK = ("command_sent", "command_offset_rad", "effort_cap_nm", "position_error_rad", "velocity_error_rad_s",
+          "path_margin_rad", "settled", "effort_residual_nm", "at_cap", "lead_rad", "blocked", "contact", "collision",
+          "overspeed_rad_s", "drive_power_w", "limit_margin_rad", "servo_timeout", "servo_fault", "effort_residual_filtered_nm")
 
 
 @dataclass(frozen=True)
