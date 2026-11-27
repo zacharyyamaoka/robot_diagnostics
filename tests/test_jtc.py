@@ -126,3 +126,14 @@ def test_step_refuses_time_going_backwards():
     monitor.step(tick)
     with pytest.raises(ValueError, match="backwards"):
         monitor.step(JtcTick(**{**tick.__dict__, "t": tick.t - 0.01}))
+
+
+def test_the_low_pass_delays_a_residual_step_and_the_hold_off_masks_contacts_after_a_gap():
+    run = ramp_run(residual_jump_at=0.3)
+    raw = first_event(scan(JtcConfig(), run), ("contact",))["t"]
+    filtered = first_event(scan(JtcConfig(residual_filter_hz=5.0), run), ("contact",))["t"]
+    # a 3 N·m step through a 5 Hz first-order filter passes 1 N·m after -ln(2/3) / (2 pi 5) = 12.9 ms (10 ms ticks: 20 ms)
+    assert filtered > raw and filtered == pytest.approx(0.33, abs=0.011)
+    gap = ramp_run(gap_at=0.25, residual_jump_at=0.3)
+    held = scan(JtcConfig(recover_s=0.3), gap)
+    assert first_event(held, ("contact",))["t"] > 0.30 + 0.3 - 1e-9

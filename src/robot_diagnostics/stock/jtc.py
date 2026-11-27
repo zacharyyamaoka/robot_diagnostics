@@ -35,6 +35,7 @@ Channels (per joint unless marked *scalar*; SI units, angles in rad; viewers con
 | tracking | ``path_margin_rad`` | path tolerance − abs(position error), while the target runs (< 0 = violated) | ``constraints.<joint>.trajectory`` |
 | tracking | ``settled`` | after the end: abs(error) <= goal tolerance and abs(velocity) <= stopped velocity | ``constraints.<joint>.goal``, ``stopped_velocity_tolerance`` |
 | effort | ``effort_residual_nm`` | measured torque − target effort | Haddadin 2017 eq. 32-34 (inverse-dynamics residual) |
+| effort | ``effort_residual_filtered_nm`` | the residual through a first-order low-pass at ``residual_filter_hz`` (= the raw one when 0): what contact and collision judge | Haddadin 2017 eq. 47 |
 | effort | ``at_cap`` | 1 when abs(measured torque) >= ``cap_fraction`` x the cap | moteus fault-register code 102 |
 | contact | ``lead_rad`` | following error along the target's motion: sign(target velocity) x (target − measured) | robot_msgs ``Stall.lead`` |
 | contact | ``blocked`` | the target moves, the joint lags by more than ``lead_rad`` and is slow, for ``blocked_dwell_s`` | homing's ``Stall``, generalised to a moving target |
@@ -68,7 +69,8 @@ MODE_FAULT, MODE_POSITION, MODE_TIMEOUT = 1, 10, 11  # moteus mode register
 
 PER_JOINT = ("command_sent", "command_offset_rad", "effort_cap_nm", "position_error_rad", "velocity_error_rad_s",
              "path_margin_rad", "settled", "effort_residual_nm", "at_cap", "lead_rad", "blocked", "contact", "collision",
-             "overspeed_rad_s", "drive_power_w", "limit_margin_rad", "servo_timeout", "servo_fault")
+             "overspeed_rad_s", "drive_power_w", "limit_margin_rad", "servo_timeout", "servo_fault",
+             "effort_residual_filtered_nm")
 SCALAR = ("tick_period_s", "missed_ticks", "state_age_s", "progress", "late_s", "outcome")
 CHANNELS = PER_JOINT + SCALAR
 # The flags whose first rise is an event (what a viewer marks and a scorer counts)
@@ -129,6 +131,14 @@ class JtcConfig:
     contact_nm: PerJoint = 1.0  # abs(residual) above it: contact (warn, not latched)
     collision_nm: PerJoint = 2.5  # abs(residual) above it: collision (fail, latched)
     residual_dwell_s: float = 0.01
+    # first-order low-pass on the residual before the contact/collision lines; 0 = off. WHY: the momentum observer's
+    # residual is a low-pass of the external torque (Haddadin 2017 eq. 47), and the raw measured-minus-feed-forward
+    # torque swings +-5 N·m in plain free motion on the bench (2026-11-27), so an unfiltered line cries wolf
+    residual_filter_hz: float = 0.0
+    # after the host missed ticks or a board timed out, the contact lines wait this long (s); 0 = off. WHY: a
+    # time-driven JTC skips ahead after a stall and its boards catch up with large torques; that torque is explained by
+    # the stall the monitor itself just saw, not by a contact (R6.HostStall, 2026-11-27)
+    recover_s: float = 0.0
     cap_fraction: float = 0.95
     max_speed_rad_s: PerJoint = 3.0  # 171.9°/s: JointCommandSequence.max_speed's default
     position_limits_rad: tuple[tuple[float, float], ...] = ()  # (low, high) per joint; () = none known
@@ -183,6 +193,8 @@ class JtcMonitor:
         self._contact_since = np.full(count, np.nan)
         self._collision_since = np.full(count, np.nan)
         self._latched = np.zeros(count, dtype=bool)
+        self._filtered = None  # the low-passed residual (None until the first finite one)
+        self._disturbed_t = -math.inf  # the last tick that missed periods or saw a board time out or fault
         self._outcome = RUNNING
         self._flag_state = {name: np.zeros(count, dtype=bool) for name in FLAGS}
         self.events: list[dict[str, Any]] = []  # {"t", "kind", "joint"}: each flag's rise on each joint, and the outcome
@@ -237,14 +249,21 @@ class JtcMonitor:
         lead = np.where(moving, np.sign(qd_target) * error, np.nan)
         slow = np.abs(qd) < self._stall if tick.qd is not None else np.zeros(count, dtype=bool)
         lagging = moving & (np.nan_to_num(lead, nan=-np.inf) > self._lead)
-        over_contact = np.nan_to_num(np.abs(residual), nan=0.0) > self._contact
-        over_collision = np.nan_to_num(np.abs(residual), nan=0.0) > self._collision
+        filtered = self._low_pass(residual, dt)
+        over_contact = np.nan_to_num(np.abs(filtered), nan=0.0) > self._contact
+        over_collision = np.nan_to_num(np.abs(filtered), nan=0.0) > self._collision
         self._blocked_since = _since(self._blocked_since, lagging & slow, t)
         self._contact_since = _since(self._contact_since, over_contact, t)
         self._collision_since = _since(self._collision_since, over_collision, t)
         blocked = (lagging & slow) & (t - self._blocked_since + 1e-12 >= config.blocked_dwell_s)
         contact = over_contact & (t - self._contact_since + 1e-12 >= config.residual_dwell_s)
         hit = blocked | (over_collision & (t - self._collision_since + 1e-12 >= config.residual_dwell_s)) | (at_cap & lagging)
+        if missed > 0.0 or (mode is not None and bool(np.any((mode == MODE_TIMEOUT) | (mode == MODE_FAULT)))):
+            self._disturbed_t = t
+        if config.recover_s > 0.0 and t - self._disturbed_t <= config.recover_s:
+            blocked = np.zeros(count, dtype=bool)
+            contact = np.zeros(count, dtype=bool)
+            hit = np.zeros(count, dtype=bool)
         self._latched |= hit
         collision = self._latched.copy()
 
@@ -294,8 +313,19 @@ class JtcMonitor:
             "at_cap": at_cap.astype(float), "lead_rad": lead, "blocked": blocked.astype(float),
             "contact": contact.astype(float), "collision": collision.astype(float), "overspeed_rad_s": overspeed,
             "drive_power_w": drive_power, "limit_margin_rad": limit_margin, "servo_timeout": timeout,
-            "servo_fault": fault, "outcome": float(self._outcome),
+            "servo_fault": fault, "outcome": float(self._outcome), "effort_residual_filtered_nm": filtered,
         }
+
+    def _low_pass(self, residual, dt: float):
+        hz = self.config.residual_filter_hz
+        if not hz > 0.0:
+            return residual
+        if self._filtered is None or dt <= 0.0:
+            self._filtered = np.where(np.isfinite(residual), residual, 0.0)
+            return self._filtered.copy()
+        alpha = dt / (dt + 1.0 / (2.0 * math.pi * hz))
+        self._filtered = self._filtered + alpha * (np.nan_to_num(residual, nan=0.0) - self._filtered)
+        return self._filtered.copy()
 
 
 @dataclass(frozen=True)
