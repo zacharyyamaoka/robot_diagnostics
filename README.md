@@ -32,6 +32,7 @@ warn MaxAboveWarnLimit 64.99 Cel
 |---|---|
 | `robot_diagnostics` (`core`, `registry`) | `Limits`, `Result`, `Evidence`, `judge`, `worst`; the registry (`evaluate`, `register`, `names`, `load_toml`, entry points in group `robotdx.diagnostics`) |
 | `robot_diagnostics.stock` | 33 stock checks: tracking and stop error, repeatability floor, model error and fidelity, coverage, sample rate, fault codes, temperature box, step response, hysteresis, ISO 9283 pose / path accuracy, Allan variance, camera (reprojection, depth plane, sharpness, marker drift), spectral, event interval, staleness, roll-ups and gate matrices |
+| `robot_diagnostics.stock.jtc` | JTC diagnostics: `JtcMonitor.step(JtcTick)` turns the target, the command sent and the state read back into 25 channels per tick (ros2 JTC error and tolerances, command sent, tick period and missed ticks, torque residual and its low-pass, lead, blocked / contact / collision, overspeed, servo timeout and fault) plus events; `scan` runs the same step over a recording; registered as `jtc.collision`, `jtc.path_margin`, `jtc.tick_period`, `jtc.command_sent`, `jtc.servo_mode` |
 | `robot_diagnostics.catalog`, `defaults` | One catalog entry per part type and check, with default thresholds and where each threshold came from; a proposed limit shows but never gates |
 | `robot_diagnostics.data` | `Trajectory`: a run's columns, each name ending in its unit (`q_rad`, `qd_rad_s`, `temp_c`) |
 | `robot_diagnostics.stream` | Slice a live stream into windows and evaluate each (`monitor`, `windows`) |
